@@ -164,8 +164,9 @@ async fn collect_prices(
         let mut all_prices = Vec::new();
         
         for pair in pairs {
-            let prices = state.dex_manager.get_all_prices(pair).await;
-            all_prices.extend(prices);
+            let pair_prices = state.dex_manager.get_all_prices(pair).await;
+            info!("💓 Price heartbeat for {} — {} prices collected", pair, pair_prices.len());
+            all_prices.extend(pair_prices);
         }
         
         all_prices
