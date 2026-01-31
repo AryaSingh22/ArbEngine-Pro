@@ -113,7 +113,7 @@ async fn run_trading_loop(state: Arc<RwLock<BotState>>, pairs: Vec<TokenPair>) {
 
         // Find and evaluate opportunities
         let opportunities = {
-            let state = state.read().await;
+            let mut state = state.write().await;
             
             // Simple arbitrage opportunities
             let mut opps = state.detector.find_all_opportunities();
@@ -122,6 +122,41 @@ async fn run_trading_loop(state: Arc<RwLock<BotState>>, pairs: Vec<TokenPair>) {
             let paths = state.path_finder.find_all_profitable_paths();
             
             debug!("Found {} simple opportunities, {} triangular paths", opps.len(), paths.len());
+            
+            // 🧪 Inject synthetic arbitrage in DRY_RUN mode for demo
+            if state.dry_run {
+                let prices = state.detector.get_prices();
+                let price_list: Vec<_> = prices.values().collect();
+                
+                if price_list.len() >= 2 {
+                    let buy = price_list[0];
+                    let sell = price_list[1];
+                    let synthetic_profit_pct = Decimal::new(12, 2); // 0.12%
+                    
+                    info!(
+                        "🧪 Synthetic arbitrage injected: Buy on {:?}, sell on {:?}, profit {:.2}%",
+                        buy.dex,
+                        sell.dex,
+                        synthetic_profit_pct
+                    );
+                    
+                    let synthetic_opp = solana_arb_core::ArbitrageOpportunity {
+                        id: solana_arb_core::Uuid::new_v4(),
+                        pair: buy.pair.clone(),
+                        buy_dex: buy.dex.clone(),
+                        sell_dex: sell.dex.clone(),
+                        buy_price: buy.ask,
+                        sell_price: sell.bid,
+                        gross_profit_pct: synthetic_profit_pct,
+                        net_profit_pct: synthetic_profit_pct,
+                        estimated_profit_usd: Some(Decimal::new(50, 2)), // $0.50 demo
+                        recommended_size: Some(Decimal::from(100)),
+                        detected_at: Utc::now(),
+                        expired_at: None,
+                    };
+                    opps.push(synthetic_opp);
+                }
+            }
             
             opps
         };
