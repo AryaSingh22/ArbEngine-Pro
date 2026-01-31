@@ -45,11 +45,17 @@ impl BotState {
             ..Default::default()
         };
 
+        let dex_manager = DexManager::new();
+        info!("🔌 DexManager initialized with {} providers", dex_manager.providers().len());
+        if dex_manager.providers().is_empty() {
+            warn!("⚠️ No DEX providers configured — bot will not fetch prices!");
+        }
+
         Self {
             detector: ArbitrageDetector::default(),
             path_finder: PathFinder::new(4),
             risk_manager: RiskManager::new(risk_config),
-            dex_manager: DexManager::new(),
+            dex_manager,
             executor: Executor::new(),
             wallet: Wallet::new().expect("Failed to load wallet"),
             is_running: true,
