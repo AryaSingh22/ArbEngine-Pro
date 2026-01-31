@@ -1,140 +1,113 @@
-# Production Deployment Guide
+# 💰 Ultimate Solana Arbitrage Deployment Guide
 
-This guide explains how to deploy the Solana Arbitrage system using Docker and how to handle the key signing limitations on Windows.
-
-## 🐳 Docker Deployment (Recommended)
-
-The easiest way to run the entire stack (Database, Cache, API, Collector, Bot) is via Docker Compose.
-
-### Prerequisites
-- Docker Engine & Docker Compose installed
-- Solana RPC URL (optional, defaults to public mainnet)
-- Private Key (for bot execution)
-
-### 1. Configuration
-Create a `.env` file from the example:
-```bash
-cp .env.example .env
-```
-Edit `.env` to set your values:
-```bash
-PRIVATE_KEY="[YOUR_BASE58_PRIVATE_KEY]"  # Required for Bot
-SOLANA_RPC_URL="https://api.mainnet-beta.solana.com"
-```
-
-### 2. Build & Run
-```bash
-docker-compose up --build -d
-```
-This command starts:
-- **PostgreSQL + TimescaleDB** (Port 5432)
-- **Redis** (Port 6379)
-- **API Server** (Port 8080)
-- **Collector Service** (Background)
-- **Trading Bot** (Background)
-
-### 3. Verify Services
-Check logs:
-```bash
-docker-compose logs -f
-```
-Access API:
-```bash
-curl http://localhost:8080/health
-```
+**Goal:** running a high-frequency trading bot to find price differences (arbitrage) on Solana and execute trades for profit.
 
 ---
 
-## ⚠️ Windows vs. Linux/WSL
+## � Requirements (Before You Start)
 
-### The Issue
-The `solana-sdk` Rust crate has known file locking availability issues when compiling on native Windows. This prevents the bot from building with real transaction signing capabilities on Windows.
+To make money, you need money (liquidity) and fast internet.
 
-### The Solution: Simulation Mode
-On Windows, the bot defaults to **Simulation Mode**:
-- ✅ Fetches live quotes from Jupiter
-- ✅ Simulates transaction building
-- ❌ Does NOT sign or send real transactions
+1.  **Solana Wallet**: You need a dedicated wallet.
+    - Create a new wallet (e.g., Phantom or generated via CLI).
+    - **Export the Private Key** (Base58 format).
+    - ⚠️ **Funding**: Load it with at least **2-5 SOL**.
+        - 0.5 SOL for transaction fees (gas).
+        - 1.5+ SOL for trading capital (USDC/SOL swaps).
 
-### How to Enable Real Trading
-To run the bot with real trading capabilities, you must deploy on a **Linux** environment (e.g., Ubuntu, Debian, or **WSL 2** on Windows).
+2.  **Fast connection (RPC Node)**
+    - The public Solana API is too slow for arbitrage. You will fail 99% of trades if you use it.
+    - **Get a paid RPC**:
+        - [Helius.xyz](https://helius.xyz) (Developer Plan is decent to start).
+        - [Quicknode](https://quicknode.com).
+    - You need the **HTTP URL** (e.g., `https://mainnet.helius-rpc.com/...`).
 
-1. **Install WSL 2** (if on Windows)
-   ```powershell
-   wsl --install
-   ```
-2. **Clone repo into WSL**
-3. **Uncomment Solana SDK dependencies**
-   
-   First in root `Cargo.toml`:
-   ```toml
-   # Cargo.toml
-   solana-sdk = "1.18"
-   solana-client = "1.18"
-   ```
+3.  **Server (VPS)** - *Highly Recommended*
+    - Don't run this on your home WiFi laptop.
+    - Rent a **Linux VPS** (Ubuntu 22.04).
+    - **Provider**: AWS (US-East-1), DigitalOcean, or Vultr.
+    - **Specs**: 4 vCPU, 8GB RAM minimum.
 
-   Then in `crates/bot/Cargo.toml`:
-   ```toml
-   # crates/bot/Cargo.toml
-   solana-sdk = { workspace = true }
-   solana-client = { workspace = true }
-   ```
-4. **Build & Run**
-   ```bash
-   cargo run --bin bot
-   ```
+---
 
-## 🚀 Going Live: Production Best Practices
+## 🛠️ Step-by-Step Installation
 
-To run this bot profitably on mainnet, consider the following:
+### Option A: The Easy Way (Docker)
+*Works on Windows, Mac, and Linux.*
 
-### 1. RPC Provider
-Do **NOT** use the public `api.mainnet-beta.solana.com` for trading. It is rate-limited and slow.
-- **Recommended**: [Helius](https://helius.xyz), [Triton](https://triton.one), or [QuickNode](https://quicknode.com).
-- **Configuration**: Set `SOLANA_RPC_URL` in your `.env`.
+#### 1. Install Docker
+- **Windows/Mac**: Download [Docker Desktop](https://www.docker.com/products/docker-desktop/).
+- **Linux**: `sudo apt install docker.io docker-compose`
 
-### 2. Transaction Landing (Priority Fees)
-Solana network congestion requires **Compute Unit (CU) optimalization** and **Priority Fees**.
-- The current simulation uses a static configuration.
-- **Upgrade**: Implement dynamic fee estimation (e.g., fetch "high" priority fee tier from RPC) to ensure your arbitrage transactions land in the next block.
+#### 2. Configure the Bot
+Inside the project folder, rename `.env.example` to `.env` and open it with a text editor.
 
-### 3. Latency
-- Run your bot node as close to the validator leaders as possible (e.g., AWS us-east-1, Tokyo, or Amsterdam depending on leader schedule).
-- Use **Geyser Plugins** (gRPC) for faster account updates instead of polling HTTP.
+Fill in these **Critical Settings**:
+```ini
+# Your Paid RPC URL (Crucial for speed)
+SOLANA_RPC_URL="https://your-helius-rpc-url..."
 
-### 4. Security
-- Create a dedicated "Trade Wallet" with limited funds.
-- Never store large amounts of SOL in the bot's hot wallet.
-- Rotate private keys periodically.
+# Your Wallet Private Key (Base58 string)
+# ⚠️ Keep this secret! Never share it.
+PRIVATE_KEY="YOUR_PRIVATE_KEY_HERE"
 
-## 🛠 Manual Deployment (Linux)
+# Risk Settings
+# Minimum profit to trigger a trade (1.0 = 1%)
+MIN_PROFIT_THRESHOLD=0.5 
 
-If avoiding Docker, run services individually:
+# Auto-Trade Mode
+# Set to 'false' to trade with REAL MONEY.
+# Set to 'true' to just simulate and watch (recommended for first 24h).
+DRY_RUN=false
+```
 
-1. **Infrastructure**: `docker-compose up -d postgres redis`
-2. **Migrations**: `sqlx migrate run`
-3. **Services**:
-   ```bash
-   # Terminal 1
-   cargo run --release --bin collector
-   
-   # Terminal 2
-   cargo run --release --bin api
-   
-   # Terminal 3
-   cargo run --release --bin bot
-   ```
+#### 3. Launch Everything
+Open your terminal/command prompt in the project folder and run:
+
+```bash
+docker-compose up --build -d
+```
+
+- This downloads necessary databases.
+- Compiles the bot (takes ~5-10 mins).
+- Starts the Dashboard.
+
+#### 4. Open the Dashboard
+Go to your browser: **[http://localhost:5173](http://localhost:5173)**
+
+---
+
+## 📈 Improving Your Odds (How to actually profit)
+
+Arbitrage is competitive. To win:
+
+### 1. Reduce Latency
+- Your bot competes with others to be the *first* to see a price difference.
+- **Action**: Deploy your VPS in the **same region** as the RPC provider (usually US-East N.Virginia or Tokyo).
+
+### 2. Pay Priority Fees
+- When Solana is busy, cheap transactions fail.
+- **Action**: The bot logic simulates fees. For real trading, you may need to tweak `execution.rs` to add a dynamic "bribe" (Compute Unit Price) to validators.
+
+### 3. Start Small
+- Keep `MAX_POSITION_SIZE` in `risk.rs` small (e.g., $50-$100) until you see consistent wins.
+- Arbitrage is lower risk than trading memecoins, but technical bugs can still lose money (e.g., failed landing fees).
+
+---
 
 ## ❓ Troubleshooting
 
-### Error: `open //./pipe/dockerDesktopLinuxEngine: The system cannot find the file specified.`
-This indicates **Docker Desktop is not running**.
-1. Open **Docker Desktop** from your Start Menu.
-2. Wait for the engine to start (the whale icon in the bottom left should stop animating and turn green).
-3. Open a **new terminal** (sometimes environment variables need a refresh).
-4. Run `docker info` to verify connection.
-5. Retry `docker-compose up --build -d`.
+**Q: I see "Docker Desktop is not running" error.**
+A: Launch the Docker Desktop app on your computer first.
 
-### Error: `os error 32` (File Locking)
-This happens on Windows when the bot tries to sign with `solana-sdk`.
-- **Fix**: Use the default "Simulation Mode" (Dry Run) or deploy on WSL 2/Linux as described above.
+**Q: I see "Simulation" or "Dry Run" in logs.**
+A: Change `DRY_RUN=false` in your `.env` file and restart (`docker-compose restart bot`).
+
+**Q: I'm not getting any trades.**
+A: 
+1. Profit threshold might be too high (0.5% is hard to find instantly). Try 0.1% or 0.2%.
+2. Your RPC is too slow (using public node).
+3. The market is efficient right now. Wait for volatility.
+
+**Q: Where are the logs?**
+A: Run `docker-compose logs -f bot` to see the brain of the bot working.
