@@ -124,3 +124,17 @@ If avoiding Docker, run services individually:
    # Terminal 3
    cargo run --release --bin bot
    ```
+
+## ❓ Troubleshooting
+
+### Error: `open //./pipe/dockerDesktopLinuxEngine: The system cannot find the file specified.`
+This indicates **Docker Desktop is not running**.
+1. Open **Docker Desktop** from your Start Menu.
+2. Wait for the engine to start (the whale icon in the bottom left should stop animating and turn green).
+3. Open a **new terminal** (sometimes environment variables need a refresh).
+4. Run `docker info` to verify connection.
+5. Retry `docker-compose up --build -d`.
+
+### Error: `os error 32` (File Locking)
+This happens on Windows when the bot tries to sign with `solana-sdk`.
+- **Fix**: Use the default "Simulation Mode" (Dry Run) or deploy on WSL 2/Linux as described above.
