@@ -65,6 +65,7 @@ async fn run_trading_loop(state: Arc<RwLock<BotState>>, pairs: Vec<TokenPair>) {
     let mut tick = 0u64;
     
     loop {
+        info!("🔎 Scanning markets for arbitrage opportunities...");
         // Check if still running
         {
             let state = state.read().await;
@@ -155,6 +156,8 @@ async fn collect_prices(
         
         all_prices
     };
+
+    info!("📈 Received price data from DEX ({} prices)", prices.len());
 
     // Update state
     {
