@@ -39,6 +39,70 @@ solana-arbitrage/
 └── DEPLOYMENT.md       # Deployment guide
 ```
 
+## 🏗️ Architecture
+
+```mermaid
+flowchart LR
+    subgraph DEXs["Solana DEXs"]
+        J[Jupiter]
+        R[Raydium]
+        O[Orca]
+    end
+
+    subgraph Backend["Rust Backend"]
+        BOT[Bot Service]
+        API[API Server]
+        CORE[Core Library]
+    end
+
+    subgraph Storage["Data Layer"]
+        PG[(PostgreSQL)]
+        RD[(Redis)]
+    end
+
+    subgraph Frontend["Dashboard"]
+        UI[React UI]
+    end
+
+    J --> BOT
+    R --> BOT
+    O --> BOT
+    BOT --> CORE
+    API --> CORE
+    BOT --> PG
+    BOT --> RD
+    API --> PG
+    UI --> API
+```
+
+**Components:**
+
+| Component | Role |
+|-----------|------|
+| **Bot** | Scans DEX prices every 500ms, detects arbitrage, executes trades |
+| **API** | REST endpoints for prices, opportunities, status |
+| **Dashboard** | Real-time visualization with live price feeds |
+| **Core** | Shared types, DEX integrations, arbitrage logic |
+
+## 🧪 Simulation (DRY_RUN) Mode
+
+> **Default: Safe mode enabled** — No real trades are executed.
+
+| Feature | Behavior |
+|---------|----------|
+| Price Fetching | ✅ Real data from Jupiter, Raydium, Orca |
+| Arbitrage Detection | ✅ Real opportunities detected |
+| Trade Execution | ❌ Simulated only (logged, not submitted) |
+| Synthetic Opportunities | ✅ Injected for dashboard testing |
+| Private Key Required | ❌ Not needed in DRY_RUN |
+
+**Use Cases:**
+- 🔬 Observability testing and dashboard development
+- 📊 Strategy tuning without capital risk
+- 🎓 Learning and demonstration
+
+Set `DRY_RUN=false` in `.env` to enable live trading (requires private key).
+
 ## 🧪 Testing
 
 ```bash

@@ -15,6 +15,8 @@ use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
+use chrono::{DateTime, Utc};
+use std::collections::HashMap;
 
 use solana_arb_core::{
     arbitrage::ArbitrageDetector,
@@ -31,6 +33,19 @@ struct AppState {
     dry_run: bool,
     simulated_pnl: RwLock<f64>,
     simulated_trades: RwLock<u32>,
+    // Liveness tracking
+    heartbeat_count: RwLock<u64>,
+    last_scan_at: RwLock<DateTime<Utc>>,
+    dex_health: RwLock<HashMap<String, DexHealthStatus>>,
+}
+
+/// DEX health status for monitoring
+#[derive(Debug, Clone, Serialize)]
+struct DexHealthStatus {
+    name: String,
+    last_success_at: Option<DateTime<Utc>>,
+    consecutive_errors: u32,
+    status: String, // "green", "yellow", "red"
 }
 
 #[derive(Debug, Serialize)]
@@ -127,6 +142,9 @@ async fn main() -> anyhow::Result<()> {
         dry_run,
         simulated_pnl: RwLock::new(0.0),
         simulated_trades: RwLock::new(0),
+        heartbeat_count: RwLock::new(0),
+        last_scan_at: RwLock::new(Utc::now()),
+        dex_health: RwLock::new(HashMap::new()),
     });
 
     // Spawn background price collector
@@ -138,10 +156,43 @@ async fn main() -> anyhow::Result<()> {
         loop {
             interval.tick().await;
             
+            // Increment heartbeat
+            {
+                let mut count = collector_state.heartbeat_count.write().await;
+                *count += 1;
+                let mut last_scan = collector_state.last_scan_at.write().await;
+                *last_scan = Utc::now();
+            }
+            
             for provider in &collector_state.providers {
-                if let Ok(prices) = provider.get_prices(&pairs).await {
-                    let mut detector = collector_state.detector.write().await;
-                    detector.update_prices(prices);
+                let dex_name = format!("{:?}", provider.dex_type());
+                
+                match provider.get_prices(&pairs).await {
+                    Ok(prices) => {
+                        let mut detector = collector_state.detector.write().await;
+                        detector.update_prices(prices);
+                        
+                        // Update DEX health - success
+                        let mut health = collector_state.dex_health.write().await;
+                        health.insert(dex_name.clone(), DexHealthStatus {
+                            name: dex_name,
+                            last_success_at: Some(Utc::now()),
+                            consecutive_errors: 0,
+                            status: "green".to_string(),
+                        });
+                    }
+                    Err(_e) => {
+                        // Update DEX health - error
+                        let mut health = collector_state.dex_health.write().await;
+                        let entry = health.entry(dex_name.clone()).or_insert(DexHealthStatus {
+                            name: dex_name.clone(),
+                            last_success_at: None,
+                            consecutive_errors: 0,
+                            status: "red".to_string(),
+                        });
+                        entry.consecutive_errors += 1;
+                        entry.status = if entry.consecutive_errors >= 5 { "red" } else { "yellow" }.to_string();
+                    }
                 }
             }
         }
@@ -295,15 +346,23 @@ async fn get_config(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     })))
 }
 
-/// Get bot status including DRY_RUN mode
+/// Get bot status including DRY_RUN mode and liveness info
 async fn get_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let simulated_pnl = *state.simulated_pnl.read().await;
     let simulated_trades = *state.simulated_trades.read().await;
+    let heartbeat_count = *state.heartbeat_count.read().await;
+    let last_scan_at = *state.last_scan_at.read().await;
+    let dex_health = state.dex_health.read().await;
+    
+    let dex_statuses: Vec<_> = dex_health.values().cloned().collect();
     
     Json(ApiResponse::success(serde_json::json!({
         "dry_run": state.dry_run,
         "bot_running": true,
         "simulated_pnl": simulated_pnl,
         "simulated_trades": simulated_trades,
+        "heartbeat_count": heartbeat_count,
+        "last_scan_at": last_scan_at.to_rfc3339(),
+        "dex_health": dex_statuses,
     })))
 }
