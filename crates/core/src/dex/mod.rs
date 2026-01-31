@@ -79,11 +79,15 @@ impl DexManager {
     pub async fn get_all_prices(&self, pair: &TokenPair) -> Vec<PriceData> {
         let mut prices = Vec::new();
         for provider in &self.providers {
+            tracing::info!("➡️ Calling price fetch for DEX: {:?}", provider.dex_type());
             match provider.get_price(pair).await {
-                Ok(price) => prices.push(price),
+                Ok(price) => {
+                    tracing::info!("⬅️ DEX {:?} returned price for {}", provider.dex_type(), pair);
+                    prices.push(price);
+                }
                 Err(e) => {
                     tracing::warn!(
-                        "Failed to get price from {}: {}",
+                        "❌ DEX {:?} fetch error: {}",
                         provider.dex_type(),
                         e
                     );
