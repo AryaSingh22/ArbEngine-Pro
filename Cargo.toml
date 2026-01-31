@@ -1,0 +1,63 @@
+[workspace]
+members = [
+    "crates/core",
+    "crates/collector",
+    "crates/api", "crates/bot",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Solana Arb Team"]
+license = "MIT"
+
+[workspace.dependencies]
+# Async Runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Decimal math for financial calculations
+rust_decimal = { version = "1", features = ["serde"] }
+
+# Error handling
+thiserror = "1"
+anyhow = "1"
+
+# Async traits
+async-trait = "0.1"
+
+# Database
+sqlx = { version = "0.7", features = ["postgres", "runtime-tokio", "chrono", "rust_decimal"] }
+
+# HTTP client
+reqwest = { version = "0.11", features = ["json"] }
+
+# WebSocket
+tokio-tungstenite = { version = "0.21", features = ["rustls-tls-webpki-roots"] }
+
+# Web framework
+axum = { version = "0.7", features = ["ws"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# Redis
+redis = { version = "0.24", features = ["tokio-comp", "streams"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Configuration
+dotenvy = "0.15"
+
+# Solana SDK (Temporarily removed due to Windows build conflicts)
+# solana-sdk = "1.16"
+# solana-client = "1.16"
+bs58 = "0.5"

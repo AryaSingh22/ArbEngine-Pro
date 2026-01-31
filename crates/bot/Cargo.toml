@@ -1,0 +1,18 @@
+[package]
+name = "solana-arb-bot"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+solana-arb-core = { path = "../core", features = ["http"] }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+dotenvy = { workspace = true }
+rust_decimal = { workspace = true }
+chrono = { workspace = true }
+bs58 = { workspace = true }
+reqwest = { version = "0.11", features = ["json"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"

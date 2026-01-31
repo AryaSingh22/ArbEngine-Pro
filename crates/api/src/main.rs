@@ -1,0 +1,283 @@
+//! Solana Arbitrage API Server
+//!
+//! REST and WebSocket API for the Arbitrage Dashboard
+
+use axum::{
+    extract::{Path, Query, State, WebSocketUpgrade},
+    http::StatusCode,
+    response::{IntoResponse, Json},
+    routing::{get, post},
+    Router,
+};
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use tower_http::cors::{Any, CorsLayer};
+use tracing::{info, Level};
+use tracing_subscriber::FmtSubscriber;
+
+use solana_arb_core::{
+    arbitrage::ArbitrageDetector,
+    config::Config,
+    dex::{jupiter::JupiterProvider, orca::OrcaProvider, raydium::RaydiumProvider, DexProvider},
+    ArbitrageConfig, ArbitrageOpportunity, DexType, PriceData, TokenPair,
+};
+
+/// Application state shared across handlers
+struct AppState {
+    detector: RwLock<ArbitrageDetector>,
+    providers: Vec<Box<dyn DexProvider>>,
+    config: Config,
+}
+
+#[derive(Debug, Serialize)]
+struct ApiResponse<T> {
+    success: bool,
+    data: Option<T>,
+    error: Option<String>,
+}
+
+impl<T: Serialize> ApiResponse<T> {
+    fn success(data: T) -> Self {
+        Self {
+            success: true,
+            data: Some(data),
+            error: None,
+        }
+    }
+
+    fn error(message: impl Into<String>) -> ApiResponse<()> {
+        ApiResponse {
+            success: false,
+            data: None,
+            error: Some(message.into()),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct PairQuery {
+    base: Option<String>,
+    quote: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpportunitiesQuery {
+    min_profit: Option<f64>,
+    limit: Option<usize>,
+}
+
+/// Default trading pairs
+fn default_pairs() -> Vec<TokenPair> {
+    vec![
+        TokenPair::new("SOL", "USDC"),
+        TokenPair::new("SOL", "USDT"),
+        TokenPair::new("RAY", "USDC"),
+        TokenPair::new("ORCA", "USDC"),
+        TokenPair::new("JUP", "USDC"),
+        TokenPair::new("BONK", "SOL"),
+    ]
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    // Load environment
+    dotenvy::dotenv().ok();
+
+    // Initialize logging
+    let subscriber = FmtSubscriber::builder()
+        .with_max_level(Level::INFO)
+        .with_target(true)
+        .finish();
+    tracing::subscriber::set_global_default(subscriber)?;
+
+    info!("Starting Solana Arbitrage API Server");
+
+    // Load configuration
+    let config = Config::from_env().unwrap_or_default();
+
+    // Initialize DEX providers
+    let providers: Vec<Box<dyn DexProvider>> = vec![
+        Box::new(JupiterProvider::new()),
+        Box::new(RaydiumProvider::new()),
+        Box::new(OrcaProvider::new()),
+    ];
+
+    // Initialize detector
+    let arb_config = ArbitrageConfig {
+        min_profit_threshold: rust_decimal::Decimal::try_from(config.min_profit_threshold)
+            .unwrap_or_default(),
+        ..Default::default()
+    };
+    let detector = RwLock::new(ArbitrageDetector::new(arb_config));
+
+    // Create app state
+    let state = Arc::new(AppState {
+        detector,
+        providers,
+        config: config.clone(),
+    });
+
+    // Spawn background price collector
+    let collector_state = state.clone();
+    tokio::spawn(async move {
+        let pairs = default_pairs();
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(500));
+        
+        loop {
+            interval.tick().await;
+            
+            for provider in &collector_state.providers {
+                if let Ok(prices) = provider.get_prices(&pairs).await {
+                    let mut detector = collector_state.detector.write().await;
+                    detector.update_prices(prices);
+                }
+            }
+        }
+    });
+
+    // Build router
+    let app = Router::new()
+        // Health check
+        .route("/health", get(health_check))
+        // Opportunities endpoints
+        .route("/api/opportunities", get(get_opportunities))
+        .route("/api/opportunities/:id", get(get_opportunity))
+        // Price endpoints
+        .route("/api/prices", get(get_prices))
+        .route("/api/prices/:pair", get(get_pair_prices))
+        // Config endpoints
+        .route("/api/config", get(get_config))
+        // Add CORS for frontend
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any),
+        )
+        .with_state(state);
+
+    // Start server
+    let addr = format!("0.0.0.0:{}", config.api_port);
+    info!("API server listening on {}", addr);
+    
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    axum::serve(listener, app).await?;
+
+    Ok(())
+}
+
+/// Health check endpoint
+async fn health_check() -> impl IntoResponse {
+    Json(ApiResponse::success(serde_json::json!({
+        "status": "healthy",
+        "version": env!("CARGO_PKG_VERSION"),
+    })))
+}
+
+/// Get current arbitrage opportunities
+async fn get_opportunities(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<OpportunitiesQuery>,
+) -> impl IntoResponse {
+    let detector = state.detector.read().await;
+    let mut opportunities = detector.find_all_opportunities();
+
+    // Filter by minimum profit if specified
+    if let Some(min_profit) = params.min_profit {
+        opportunities.retain(|o| {
+            o.net_profit_pct >= rust_decimal::Decimal::try_from(min_profit).unwrap_or_default()
+        });
+    }
+
+    // Limit results
+    let limit = params.limit.unwrap_or(50);
+    opportunities.truncate(limit);
+
+    Json(ApiResponse::success(opportunities))
+}
+
+/// Get a specific opportunity by ID
+async fn get_opportunity(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let detector = state.detector.read().await;
+    let opportunities = detector.find_all_opportunities();
+    
+    match solana_arb_core::Uuid::parse_str(&id) {
+        Ok(uuid) => {
+            if let Some(opp) = opportunities.iter().find(|o| o.id == uuid) {
+                Json(ApiResponse::success(opp.clone())).into_response()
+            } else {
+                (StatusCode::NOT_FOUND, Json(ApiResponse::<()>::error("Opportunity not found"))).into_response()
+            }
+        }
+        Err(_) => {
+            (StatusCode::BAD_REQUEST, Json(ApiResponse::<()>::error("Invalid UUID"))).into_response()
+        }
+    }
+}
+
+/// Get current prices from all DEXs
+async fn get_prices(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<PairQuery>,
+) -> impl IntoResponse {
+    let detector = state.detector.read().await;
+    let prices = detector.get_prices();
+
+    let result: Vec<_> = prices.values().cloned().collect();
+
+    // Filter by pair if specified
+    let filtered: Vec<PriceData> = if params.base.is_some() || params.quote.is_some() {
+        result.into_iter()
+            .filter(|p| {
+                let base_match = params.base.as_ref().map_or(true, |b| &p.pair.base == b);
+                let quote_match = params.quote.as_ref().map_or(true, |q| &p.pair.quote == q);
+                base_match && quote_match
+            })
+            .collect()
+    } else {
+        result
+    };
+
+    Json(ApiResponse::success(filtered))
+}
+
+/// Get prices for a specific pair
+async fn get_pair_prices(
+    State(state): State<Arc<AppState>>,
+    Path(pair_str): Path<String>,
+) -> impl IntoResponse {
+    // Parse pair string (e.g., "SOL-USDC" or "SOL/USDC")
+    let parts: Vec<&str> = pair_str.split(|c| c == '-' || c == '/').collect();
+    
+    if parts.len() != 2 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse::<()>::error("Invalid pair format. Use BASE-QUOTE or BASE/QUOTE")),
+        ).into_response();
+    }
+
+    let pair = TokenPair::new(parts[0], parts[1]);
+    
+    let detector = state.detector.read().await;
+    let prices = detector.get_prices();
+
+    let result: Vec<_> = prices.values()
+        .filter(|p| p.pair == pair)
+        .cloned()
+        .collect();
+
+    Json(ApiResponse::success(result)).into_response()
+}
+
+/// Get current configuration
+async fn get_config(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    Json(ApiResponse::success(serde_json::json!({
+        "min_profit_threshold": state.config.min_profit_threshold,
+        "api_port": state.config.api_port,
+        "log_level": state.config.log_level,
+    })))
+}

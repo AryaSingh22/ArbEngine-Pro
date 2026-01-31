@@ -1,0 +1,40 @@
+[package]
+name = "solana-arb-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+rust_decimal = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+futures-util = "0.3"
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Optional - for HTTP-based DEX providers
+reqwest = { workspace = true, optional = true }
+
+# Optional - for WebSocket connections  
+tokio-tungstenite = { workspace = true, optional = true }
+
+# Optional - for database storage
+sqlx = { workspace = true, optional = true }
+
+# Optional - for Redis pub/sub
+redis = { workspace = true, optional = true }
+
+[features]
+default = ["http"]
+http = ["reqwest"]
+ws = ["tokio-tungstenite"]
+db = ["sqlx"]
+cache = ["redis"]
+full = ["http", "ws", "db", "cache"]
+
+[dev-dependencies]
+tokio-test = "0.4"

@@ -1,0 +1,178 @@
+.opportunities-container {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  border-radius: 16px;
+  padding: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.opportunities-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.opportunities-header h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  color: #fff;
+  font-weight: 600;
+}
+
+.opportunity-count {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.opportunities-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.opportunities-table th {
+  text-align: left;
+  padding: 12px 16px;
+  color: #a0aec0;
+  font-weight: 500;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+}
+
+.opportunities-table td {
+  padding: 16px;
+  color: #e2e8f0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.opportunities-table tbody tr {
+  transition: all 0.2s ease;
+}
+
+.opportunities-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.pair-cell .pair-symbol {
+  font-weight: 600;
+  color: #fff;
+  font-size: 1rem;
+}
+
+.price-cell {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  color: #a0aec0;
+}
+
+.profit-cell {
+  text-align: center;
+}
+
+.profit-value {
+  font-weight: 700;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+.profit-high .profit-value {
+  background: rgba(72, 187, 120, 0.2);
+  color: #68d391;
+}
+
+.profit-medium .profit-value {
+  background: rgba(236, 201, 75, 0.2);
+  color: #f6e05e;
+}
+
+.profit-low .profit-value {
+  background: rgba(160, 174, 192, 0.2);
+  color: #a0aec0;
+}
+
+.dex-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.dex-raydium {
+  background: rgba(74, 222, 128, 0.15);
+  color: #4ade80;
+  border: 1px solid rgba(74, 222, 128, 0.3);
+}
+
+.dex-orca {
+  background: rgba(168, 85, 247, 0.15);
+  color: #a855f7;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+}
+
+.dex-jupiter {
+  background: rgba(251, 146, 60, 0.15);
+  color: #fb923c;
+  border: 1px solid rgba(251, 146, 60, 0.3);
+}
+
+.time-cell {
+  color: #718096;
+  font-size: 0.875rem;
+}
+
+.opportunities-loading,
+.opportunities-error,
+.no-opportunities {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  color: #a0aec0;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid rgba(102, 126, 234, 0.3);
+  border-top: 3px solid #667eea;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 16px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.opportunities-error button {
+  margin-top: 12px;
+  padding: 10px 24px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.opportunities-error button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.no-opportunities .hint {
+  color: #718096;
+  font-size: 0.875rem;
+  margin-top: 8px;
+}

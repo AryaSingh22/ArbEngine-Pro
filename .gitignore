@@ -1,0 +1,36 @@
+# Rust
+target/
+**/*.rs.bk
+
+# Node/Frontend
+node_modules/
+dist/
+build/
+.npm/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.iml
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+build_err.txt
+build_errors.txt
+build_errors_3.txt
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Plans/Artifacts (if copied to root)
+implementation_plan.md
+task.md
+walkthrough.md

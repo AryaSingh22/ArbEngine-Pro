@@ -1,0 +1,93 @@
+.profit-chart-container {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    border-radius: 16px;
+    padding: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.chart-header h2 {
+    margin: 0;
+    font-size: 1.5rem;
+    color: #fff;
+    font-weight: 600;
+}
+
+.time-selector {
+    display: flex;
+    gap: 8px;
+}
+
+.time-btn {
+    padding: 8px 16px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    color: #a0aec0;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.time-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.time-btn.active {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-color: transparent;
+    color: #fff;
+}
+
+.chart-wrapper {
+    width: 100%;
+}
+
+.chart-tooltip {
+    background: rgba(26, 26, 46, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 12px 16px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.tooltip-time {
+    color: #a0aec0;
+    font-size: 0.75rem;
+    margin-bottom: 8px;
+}
+
+.tooltip-profit {
+    color: #e2e8f0;
+    font-size: 0.875rem;
+    margin: 4px 0;
+}
+
+.tooltip-profit span {
+    color: #4ade80;
+    font-weight: 600;
+}
+
+.tooltip-count {
+    color: #e2e8f0;
+    font-size: 0.875rem;
+    margin: 4px 0;
+}
+
+.tooltip-count span {
+    color: #667eea;
+    font-weight: 600;
+}
+
+.recharts-legend-item-text {
+    color: #a0aec0 !important;
+}

@@ -1,0 +1,83 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    container_name: solana-arb-postgres
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: solana_arb
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: solana-arb-redis
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Application Services
+  api:
+    build: .
+    container_name: solana-arb-api
+    command: api
+    ports:
+      - '8080:8080'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/solana_arb
+      - REDIS_URL=redis://redis:6379
+      - RUST_LOG=info
+
+  collector:
+    build: .
+    container_name: solana-arb-collector
+    command: collector
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/solana_arb
+      - REDIS_URL=redis://redis:6379
+      - RUST_LOG=info
+
+  bot:
+    build: .
+    container_name: solana-arb-bot
+    command: bot-binary
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/solana_arb
+      - REDIS_URL=redis://redis:6379
+      - RUST_LOG=info
+      - DRY_RUN=true
+      - PRIVATE_KEY=${PRIVATE_KEY:-}
+
+volumes:
+  postgres_data:
+  redis_data:
