@@ -18,7 +18,7 @@ use solana_arb_core::{
     dex::{DexManager, jupiter::JupiterProvider, raydium::RaydiumProvider, orca::OrcaProvider},
     pathfinder::PathFinder,
     risk::{RiskManager, RiskConfig, TradeDecision, TradeOutcome},
-    TokenPair,
+    DexType, TokenPair,
 };
 use wallet::Wallet;
 use execution::Executor;
@@ -33,6 +33,8 @@ struct BotState {
     wallet: Wallet,
     is_running: bool,
     dry_run: bool,
+    rpc_url: String,
+    max_price_age_seconds: i64,
 }
 
 impl BotState {
@@ -68,6 +70,8 @@ impl BotState {
             wallet: Wallet::new().expect("Failed to load wallet"),
             is_running: true,
             dry_run,
+            rpc_url: config.solana_rpc_url.clone(),
+            max_price_age_seconds: config.max_price_age_seconds,
         }
     }
 }
@@ -114,6 +118,7 @@ async fn run_trading_loop(state: Arc<RwLock<BotState>>, pairs: Vec<TokenPair>) {
         // Find and evaluate opportunities
         let opportunities = {
             let state = state.read().await;
+
             
             // Simple arbitrage opportunities
             let mut opps = state.detector.find_all_opportunities();
@@ -212,10 +217,11 @@ async fn collect_prices(
     // Update state
     {
         let mut state = state.write().await;
-        
+
         // Update detector
         state.detector.update_prices(prices.clone());
-        
+        state.detector.clear_stale_prices(state.max_price_age_seconds);
+
         // Update pathfinder
         state.path_finder.clear();
         for price in &prices {
@@ -223,7 +229,38 @@ async fn collect_prices(
         }
     }
 
+    validate_dex_coverage(&prices, pairs);
+
     Ok(())
+}
+
+fn validate_dex_coverage(prices: &[solana_arb_core::PriceData], pairs: &[TokenPair]) {
+    let mut coverage: std::collections::HashMap<String, std::collections::HashSet<DexType>> =
+        std::collections::HashMap::new();
+
+    for price in prices {
+        coverage
+            .entry(price.pair.symbol())
+            .or_default()
+            .insert(price.dex);
+    }
+
+    for pair in pairs {
+        let seen = coverage.get(&pair.symbol());
+        let missing: Vec<_> = DexType::all()
+            .iter()
+            .filter(|dex| seen.map_or(true, |set| !set.contains(dex)))
+            .collect();
+
+        if !missing.is_empty() {
+            let missing_labels: Vec<_> = missing.iter().map(|dex| dex.display_name()).collect();
+            warn!(
+                "⚠️ Missing DEX coverage for {}: {}",
+                pair,
+                missing_labels.join(", ")
+            );
+        }
+    }
 }
 
 /// Execute a trade (or simulate in dry-run mode)
@@ -237,6 +274,10 @@ async fn execute_trade(
     // AND calling async execution which shouldn't hold locks if possible.
     // However, Executor is stateless (HttpClient) so we can clone data needed.
 
+    let (is_dry_run, decision, rpc_url) = {
+        let state = state.read().await;
+        let decision = state.risk_manager.can_trade(&pair_symbol, Decimal::from(100));
+        (state.dry_run, decision, state.rpc_url.clone())
     let (is_dry_run, decision) = {
         let state = state.read().await;
         let decision = state.risk_manager.can_trade(&pair_symbol, Decimal::from(100));
@@ -269,7 +310,11 @@ async fn execute_trade(
         // Fetch quote simulation (optional)
         {
             let state_read = state.read().await;
-            if let Err(e) = state_read.executor.execute(&state_read.wallet, opp, size).await {
+            if let Err(e) = state_read
+                .executor
+                .execute(&state_read.wallet, opp, size, false, &rpc_url)
+                .await
+            {
                 warn!("Simulation execution failed: {}", e);
             }
         }
@@ -296,8 +341,11 @@ async fn execute_trade(
         );
 
         let result = {
-             let state_read = state.read().await;
-             state_read.executor.execute(&state_read.wallet, opp, size).await
+            let state_read = state.read().await;
+            state_read
+                .executor
+                .execute(&state_read.wallet, opp, size, true, &rpc_url)
+                .await
         };
 
         match result {

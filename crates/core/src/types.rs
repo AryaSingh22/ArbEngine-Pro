@@ -31,6 +31,12 @@ impl DexType {
             DexType::Jupiter => "Jupiter",
         }
     }
+
+    /// Returns all supported DEXs in priority order.
+    pub fn all() -> &'static [DexType] {
+        const ALL: &[DexType] = &[DexType::Raydium, DexType::Orca, DexType::Jupiter];
+        ALL
+    }
 }
 
 impl std::fmt::Display for DexType {

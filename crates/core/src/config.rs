@@ -13,6 +13,8 @@ pub struct Config {
     pub solana_rpc_url: String,
     /// Minimum profit threshold percentage
     pub min_profit_threshold: f64,
+    /// Maximum age of price data before it is considered stale (seconds)
+    pub max_price_age_seconds: i64,
     /// API server port
     pub api_port: u16,
     /// Log level
@@ -33,6 +35,10 @@ impl Config {
                 .unwrap_or_else(|_| "0.5".to_string())
                 .parse()
                 .unwrap_or(0.5),
+            max_price_age_seconds: env::var("MAX_PRICE_AGE_SECONDS")
+                .unwrap_or_else(|_| "5".to_string())
+                .parse()
+                .unwrap_or(5),
             api_port: env::var("API_PORT")
                 .unwrap_or_else(|_| "8080".to_string())
                 .parse()
@@ -50,6 +56,7 @@ impl Default for Config {
             redis_url: "redis://localhost:6379".to_string(),
             solana_rpc_url: "https://api.mainnet-beta.solana.com".to_string(),
             min_profit_threshold: 0.5,
+            max_price_age_seconds: 5,
             api_port: 8080,
             log_level: "info".to_string(),
         }
