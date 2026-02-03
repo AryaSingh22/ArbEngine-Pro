@@ -119,6 +119,7 @@ async fn run_trading_loop(state: Arc<RwLock<BotState>>, pairs: Vec<TokenPair>) {
         let opportunities = {
             let state = state.read().await;
 
+            
             // Simple arbitrage opportunities
             let mut opps = state.detector.find_all_opportunities();
             
@@ -277,6 +278,10 @@ async fn execute_trade(
         let state = state.read().await;
         let decision = state.risk_manager.can_trade(&pair_symbol, Decimal::from(100));
         (state.dry_run, decision, state.rpc_url.clone())
+    let (is_dry_run, decision) = {
+        let state = state.read().await;
+        let decision = state.risk_manager.can_trade(&pair_symbol, Decimal::from(100));
+        (state.dry_run, decision)
     };
 
     let size = match decision {
