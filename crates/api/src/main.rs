@@ -3,10 +3,10 @@
 //! REST and WebSocket API for the Arbitrage Dashboard
 
 use axum::{
-    extract::{Path, Query, State, WebSocketUpgrade},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Json},
-    routing::{get, post},
+    routing::get,
     Router,
 };
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,7 @@ use solana_arb_core::{
     arbitrage::ArbitrageDetector,
     config::Config,
     dex::{jupiter::JupiterProvider, orca::OrcaProvider, raydium::RaydiumProvider, DexProvider},
-    ArbitrageConfig, ArbitrageOpportunity, DexType, PriceData, TokenPair,
+    ArbitrageConfig, DexType, PriceData, TokenPair,
 };
 
 /// Application state shared across handlers
@@ -37,6 +37,7 @@ struct AppState {
     heartbeat_count: RwLock<u64>,
     last_scan_at: RwLock<DateTime<Utc>>,
     dex_health: RwLock<HashMap<String, DexHealthStatus>>,
+    max_price_age_seconds: i64,
 }
 
 /// DEX health status for monitoring
@@ -145,6 +146,7 @@ async fn main() -> anyhow::Result<()> {
         heartbeat_count: RwLock::new(0),
         last_scan_at: RwLock::new(Utc::now()),
         dex_health: RwLock::new(HashMap::new()),
+        max_price_age_seconds: config.max_price_age_seconds,
     });
 
     // Spawn background price collector
@@ -171,6 +173,7 @@ async fn main() -> anyhow::Result<()> {
                     Ok(prices) => {
                         let mut detector = collector_state.detector.write().await;
                         detector.update_prices(prices);
+                        detector.clear_stale_prices(collector_state.max_price_age_seconds);
                         
                         // Update DEX health - success
                         let mut health = collector_state.dex_health.write().await;
@@ -195,6 +198,8 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             }
+
+            validate_dex_coverage(&collector_state).await;
         }
     });
 
@@ -229,6 +234,35 @@ async fn main() -> anyhow::Result<()> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+async fn validate_dex_coverage(state: &Arc<AppState>) {
+    let detector = state.detector.read().await;
+    let mut coverage: HashMap<String, std::collections::HashSet<DexType>> = HashMap::new();
+
+    for price in detector.get_prices().values() {
+        coverage
+            .entry(price.pair.symbol())
+            .or_default()
+            .insert(price.dex);
+    }
+
+    for pair in default_pairs() {
+        let seen = coverage.get(&pair.symbol());
+        let missing: Vec<_> = DexType::all()
+            .iter()
+            .filter(|dex| seen.map_or(true, |set| !set.contains(dex)))
+            .collect();
+
+        if !missing.is_empty() {
+            let missing_labels: Vec<_> = missing.iter().map(|dex| dex.display_name()).collect();
+            info!(
+                "⚠️ Missing DEX coverage for {}: {}",
+                pair,
+                missing_labels.join(", ")
+            );
+        }
+    }
 }
 
 /// Health check endpoint
@@ -364,5 +398,6 @@ async fn get_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         "heartbeat_count": heartbeat_count,
         "last_scan_at": last_scan_at.to_rfc3339(),
         "dex_health": dex_statuses,
+        "max_price_age_seconds": state.max_price_age_seconds,
     })))
 }

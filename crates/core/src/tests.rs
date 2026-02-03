@@ -53,6 +53,7 @@ mod types_tests {
 #[cfg(test)]
 mod arbitrage_tests {
     use super::*;
+    use chrono::Duration;
 
     fn create_detector_with_low_threshold() -> ArbitrageDetector {
         let config = ArbitrageConfig {
@@ -154,6 +155,26 @@ mod arbitrage_tests {
         let all = detector.find_all_opportunities();
         assert!(all.len() >= 2, "Should find opportunities across multiple pairs");
     }
+
+    #[test]
+    fn test_full_arbitrage_cycle_with_stale_prices() {
+        let mut detector = create_detector_with_low_threshold();
+
+        let mut raydium_price = make_price(DexType::Raydium, "SOL", "USDC", 99.9, 100.0);
+        raydium_price.timestamp = raydium_price.timestamp - Duration::seconds(10);
+        detector.update_price(raydium_price);
+
+        detector.update_price(make_price(DexType::Orca, "SOL", "USDC", 102.0, 102.1));
+        detector.update_price(make_price(DexType::Jupiter, "SOL", "USDC", 101.0, 101.1));
+
+        detector.clear_stale_prices(5);
+
+        let opportunities = detector.find_opportunities(&TokenPair::new("SOL", "USDC"));
+        assert!(
+            opportunities.iter().all(|opp| opp.buy_dex != DexType::Raydium),
+            "Stale prices should not contribute to opportunities"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -165,6 +186,7 @@ mod config_tests {
         let config = Config::default();
         assert_eq!(config.api_port, 8080);
         assert_eq!(config.min_profit_threshold, 0.5);
+        assert_eq!(config.max_price_age_seconds, 5);
         assert!(config.solana_rpc_url.contains("solana"));
     }
 }

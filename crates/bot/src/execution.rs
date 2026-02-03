@@ -3,15 +3,20 @@
 //! Handles fetching quotes and swap instructions from aggregators (Jupiter).
 //! Implements HTTP-based execution path.
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
+use base64::engine::general_purpose::STANDARD as BASE64_ENGINE;
+use base64::Engine;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use std::collections::HashMap;
+use solana_client::rpc_client::RpcClient;
+use solana_sdk::commitment_config::CommitmentConfig;
+use solana_sdk::transaction::VersionedTransaction;
 use tracing::{info, debug, warn};
 
-use solana_arb_core::{TokenPair, ArbitrageOpportunity};
+use solana_arb_core::ArbitrageOpportunity;
 use crate::wallet::Wallet;
 
 const JUPITER_API_URL: &str = "https://quote-api.jup.ag/v6";
@@ -26,14 +31,6 @@ const ORCA_MINT: &str = "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE";
 pub struct Executor {
     client: Client,
     token_map: HashMap<String, String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct QuoteResponse {
-    #[serde(rename = "outAmount")]
-    out_amount: String,
-    #[serde(rename = "priceImpactPct")]
-    price_impact_pct: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -87,7 +84,9 @@ impl Executor {
         &self, 
         wallet: &Wallet, 
         opp: &ArbitrageOpportunity, 
-        amount_usd: Decimal
+        amount_usd: Decimal,
+        submit: bool,
+        rpc_url: &str,
     ) -> Result<String> {
         // For simplicity in this phase, we'll just demonstrate fetching the swap instruction
         // We assume we are swapping the base token.
@@ -129,13 +128,42 @@ impl Executor {
 
         if response.status().is_success() {
             let swap_resp: SwapResponse = response.json().await?;
-            info!("✅ Received swap transaction (Base64 length: {})", swap_resp.swap_transaction.len());
-            info!("📝 [SIMULATION] Transaction would be signed and sent here.");
-            Ok(swap_resp.swap_transaction)
+            info!(
+                "✅ Received swap transaction (Base64 length: {})",
+                swap_resp.swap_transaction.len()
+            );
+
+            if submit {
+                let signature = self.submit_swap_transaction(wallet, &swap_resp.swap_transaction, rpc_url)?;
+                info!("✅ Swap submitted: {}", signature);
+                Ok(signature)
+            } else {
+                info!("📝 [SIMULATION] Transaction would be signed and sent here.");
+                Ok(swap_resp.swap_transaction)
+            }
         } else {
             let error_text = response.text().await?;
             warn!("Failed to get swap transaction: {}", error_text);
             Ok("Failed".to_string())
         }
+    }
+
+    fn submit_swap_transaction(
+        &self,
+        wallet: &Wallet,
+        encoded_tx: &str,
+        rpc_url: &str,
+    ) -> Result<String> {
+        let signer = wallet
+            .signer()
+            .ok_or_else(|| anyhow!("No keypair available for signing"))?;
+
+        let tx_bytes = BASE64_ENGINE.decode(encoded_tx)?;
+        let tx: VersionedTransaction = bincode::deserialize(&tx_bytes)?;
+        let signed_tx = VersionedTransaction::try_new(tx.message, &[signer])?;
+
+        let client = RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::confirmed());
+        let signature = client.send_and_confirm_transaction(&signed_tx)?;
+        Ok(signature.to_string())
     }
 }
