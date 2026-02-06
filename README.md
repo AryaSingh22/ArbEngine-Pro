@@ -1,5 +1,5 @@
 # Solana Arbitrage Dashboard
-
+ 
 A high-performance arbitrage opportunity detection and automated trading system for Solana DEXs, built with Rust + React.
 
 ## ✅ Features
