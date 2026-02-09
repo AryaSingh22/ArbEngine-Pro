@@ -2080,6 +2080,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "futures-util",
+ "rand 0.8.5",
  "redis",
  "reqwest",
  "rust_decimal",
@@ -2091,6 +2092,7 @@ dependencies = [
  "tokio-test",
  "tokio-tungstenite 0.26.2",
  "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 
