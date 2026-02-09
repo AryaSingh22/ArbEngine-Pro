@@ -103,6 +103,19 @@ flowchart LR
 
 Set `DRY_RUN=false` in `.env` to enable live trading (requires private key).
 
+### 📈 Top Simulation Opportunities (Log Extract)
+
+| Pair | Buy DEX | Sell DEX | Profit % | Est. Profit |
+|------|---------|----------|----------|-------------|
+| **BONK/SOL** | Orca | Jupiter | **2.40%** | $13.27 |
+| **ORCA/USDC** | Jupiter | Orca | **2.37%** | $7.30 |
+| **BONK/SOL** | Raydium | Orca | **2.32%** | $15.92 |
+| **RAY/USDC** | Raydium | Jupiter | **2.28%** | $15.53 |
+| **BONK/SOL** | Jupiter | Raydium | **2.28%** | $9.58 |
+| **JUP/USDC** | Raydium | Jupiter | **2.17%** | $13.97 |
+
+> *Data captured from [dry-run-log.txt](docs/dry-run-log.txt) during simulation testing.*
+
 ## 🧪 Testing
 
 ```bash
