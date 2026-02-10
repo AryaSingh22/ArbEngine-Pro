@@ -25,3 +25,4 @@ anyhow = "1.0"
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
+rand = "0.8"

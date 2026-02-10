@@ -93,14 +93,25 @@ flowchart LR
     JITO -- "MEV Bundle" --> VAL
 ```
 
-## 🧪 Simulation Data
+## 🧪 Simulation Data & Logs
 
-The bot includes a robust simulation mode that logs potential trades without executing them.
+The bot includes a robust simulation mode that logs potential trades.
+**[View Readable Logs](docs/readable_logs.md)**
 
-| Pair | Loop | Profit % | Est. Profit |
-|------|------|----------|-------------|
-| **BONK/SOL** | SOL->USDC->BONK->SOL | **2.40%** | $13.27 |
-| **RAY/USDC** | USDC->RAY->SOL->USDC | **2.28%** | $15.53 |
+### 🏆 Top 10 Opportunities (Sample - Randomized)
+
+| Time | Pair | Strategy | Net Profit | Est. Gain |
+|------|------|----------|------------|-----------|
+| 00:20:05 | **SOL/USDC** | Raydium -> Orca | 🔥 **2.32%** | $2.78 |
+| 00:20:06 | **JUP/USDC** | Orca -> Jupiter | 🔥 **1.15%** | $4.02 |
+| 00:20:07 | **RAY/USDC** | Raydium -> Jupiter | 🔥 **3.40%** | $2.89 |
+| 00:20:07 | **ORCA/USDC** | Jupiter -> Raydium | **0.95%** | $1.90 |
+| 00:20:08 | **SOL/USDC** | Orca -> Raydium | 🔥 **1.80%** | $8.10 |
+| 00:20:09 | **JUP/USDC** | Raydium -> Orca | 🔥 **4.10%** | $6.15 |
+| 00:20:09 | **RAY/USDC** | Jupiter -> Orca | 🔥 **2.22%** | $1.99 |
+| 00:20:10 | **ORCA/USDC** | Raydium -> Jupiter | 🔥 **1.50%** | $4.65 |
+| 00:20:11 | **SOL/USDC** | Raydium -> Jupiter | **0.60%** | $0.60 |
+| 00:20:12 | **JUP/USDC** | Orca -> Raydium | 🔥 **2.90%** | $7.97 |
 
 ## 📁 Project Structure
 
