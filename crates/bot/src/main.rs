@@ -20,6 +20,7 @@ use solana_arb_core::{
     pathfinder::PathFinder,
     risk::{RiskManager, RiskConfig, TradeDecision, TradeOutcome},
     flash_loan::{FlashLoanProvider, MockFlashLoanProvider},
+    history::HistoryRecorder,
     DexType, TokenPair,
 };
 use wallet::Wallet;
@@ -37,6 +38,7 @@ struct BotState {
     executor: Executor,
     wallet: Wallet,
     flash_loan_provider: Box<dyn FlashLoanProvider>,
+    history_recorder: HistoryRecorder,
     is_running: bool,
     dry_run: bool,
     rpc_url: String,
@@ -71,6 +73,11 @@ impl BotState {
         let flash_loan_provider = Box::new(MockFlashLoanProvider::new("Solend-Mock"));
         info!("🏦 Initialized Flash Loan Provider: {}", flash_loan_provider.name());
 
+        let temp_session_id = format!("SESSION-{}", Utc::now().format("%Y%m%d-%H%M%S"));
+        let history_file = if dry_run { "data/history-sim.jsonl" } else { "data/history-live.jsonl" };
+        let history_recorder = HistoryRecorder::new(history_file, &temp_session_id);
+        info!("📜 Trade history will be saved to: {}", history_file);
+
         Self {
             detector: ArbitrageDetector::default(),
             path_finder: PathFinder::new(4),
@@ -85,6 +92,7 @@ impl BotState {
             }),
             wallet: Wallet::new().expect("Failed to load wallet"),
             flash_loan_provider,
+            history_recorder,
             is_running: true,
             dry_run,
             rpc_url: config.solana_rpc_url.clone(),
@@ -381,6 +389,21 @@ async fn execute_trade(
             }
         }
 
+        // Record simulation history
+        {
+            let state_read = state.read().await;
+            let est_profit = (size * opp.net_profit_pct) / Decimal::from(100);
+            state_read.history_recorder.record_trade(
+                opp,
+                size,
+                est_profit,
+                true,
+                None,
+                None,
+                true
+            );
+        }
+
         // Simulate successful outcome
         let outcome = TradeOutcome {
             timestamp: Utc::now(),
@@ -421,13 +444,44 @@ async fn execute_trade(
                     profit_loss: size * opp.net_profit_pct / Decimal::from(100), // Estimated
                     was_successful: true,
                 };
+                
+                // Record history
+                {
+                    let state_read = state.read().await;
+                    let est_profit = (size * opp.net_profit_pct) / Decimal::from(100);
+                    state_read.history_recorder.record_trade(
+                        opp,
+                        size,
+                        est_profit,
+                        true,
+                        Some(tx_signature.to_string()),
+                        None,
+                        false
+                    );
+                }
+
                 let mut state = state.write().await;
                 state.risk_manager.record_trade(outcome);
             }
             Err(e) => {
                 error!("❌ Trade failed: {}", e);
+                
+                // Record failure history
+                {
+                    let state_read = state.read().await;
+                    state_read.history_recorder.record_trade(
+                        opp,
+                        size,
+                        Decimal::ZERO,
+                        false,
+                        None,
+                        Some(e.to_string()),
+                        false
+                    );
+                }
+
                 // Record failure
-                 let outcome = TradeOutcome {
+                let outcome = TradeOutcome {
                     timestamp: Utc::now(),
                     pair: pair_symbol,
                     profit_loss: Decimal::ZERO,
