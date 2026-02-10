@@ -22,8 +22,8 @@ reqwest = { workspace = true, optional = true }
 # Optional - for WebSocket connections  
 tokio-tungstenite = { workspace = true, optional = true }
 
-# Optional - for database storage
-sqlx = { workspace = true, optional = true }
+# Optional - for database storage - DISABLED TO FIX BUILD CONFLICT
+# sqlx = { workspace = true, optional = true }
 
 # Optional - for Redis pub/sub
 redis = { workspace = true, optional = true }
@@ -32,9 +32,9 @@ redis = { workspace = true, optional = true }
 default = ["http"]
 http = ["reqwest"]
 ws = ["tokio-tungstenite"]
-db = ["sqlx"]
+# db = ["sqlx"]
 cache = ["redis"]
-full = ["http", "ws", "db", "cache"]
+full = ["http", "ws", "cache"]
 
 [dev-dependencies]
 tokio-test = "0.4"

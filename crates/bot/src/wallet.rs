@@ -4,7 +4,6 @@
 //! Supports SDK Keypairs for live signing while retaining simulated defaults.
 
 use anyhow::{anyhow, Result};
-use anyhow::Result;
 use std::env;
 use tracing::{info, warn};
 use solana_sdk::signature::{Keypair, Signer};

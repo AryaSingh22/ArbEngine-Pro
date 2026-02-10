@@ -11,6 +11,7 @@ use chrono::Utc;
 
 mod wallet;
 mod execution;
+mod jito;
 
 use solana_arb_core::{
     arbitrage::ArbitrageDetector,
@@ -66,7 +67,13 @@ impl BotState {
             path_finder: PathFinder::new(4),
             risk_manager: RiskManager::new(risk_config),
             dex_manager,
-            executor: Executor::new(),
+            executor: Executor::with_config(execution::ExecutionConfig {
+                priority_fee_micro_lamports: config.priority_fee_micro_lamports,
+                compute_unit_limit: config.compute_unit_limit,
+                slippage_bps: config.slippage_bps,
+                max_retries: config.max_retries,
+                rpc_commitment: config.rpc_commitment.clone(),
+            }),
             wallet: Wallet::new().expect("Failed to load wallet"),
             is_running: true,
             dry_run,
@@ -220,7 +227,8 @@ async fn collect_prices(
 
         // Update detector
         state.detector.update_prices(prices.clone());
-        state.detector.clear_stale_prices(state.max_price_age_seconds);
+        let max_age = state.max_price_age_seconds;
+        state.detector.clear_stale_prices(max_age);
 
         // Update pathfinder
         state.path_finder.clear();
@@ -278,10 +286,6 @@ async fn execute_trade(
         let state = state.read().await;
         let decision = state.risk_manager.can_trade(&pair_symbol, Decimal::from(100));
         (state.dry_run, decision, state.rpc_url.clone())
-    let (is_dry_run, decision) = {
-        let state = state.read().await;
-        let decision = state.risk_manager.can_trade(&pair_symbol, Decimal::from(100));
-        (state.dry_run, decision)
     };
 
     let size = match decision {
@@ -403,6 +407,11 @@ async fn main() {
 
     info!("🚀 Solana Arbitrage Bot starting...");
     info!("   Min profit threshold: {}%", min_profit_threshold);
+    info!("   Priority fee: {} µL/CU", config.priority_fee_micro_lamports);
+    info!("   Slippage tolerance: {} bps", config.slippage_bps);
+    info!("   RPC commitment: {}", config.rpc_commitment);
+    info!("   Max retries: {}", config.max_retries);
+    info!("   RPC URL: {}", config.solana_rpc_url);
 
     // Check for dry-run mode
     let dry_run = std::env::var("DRY_RUN")

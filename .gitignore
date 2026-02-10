@@ -24,6 +24,7 @@ build/
 build_err.txt
 build_errors.txt
 build_errors_3.txt
+build_log*.txt
 
 # OS
 Thumbs.db

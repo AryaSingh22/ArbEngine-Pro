@@ -1,9 +1,9 @@
 [workspace]
 members = [
     "crates/core",
-    "crates/collector",
-    "crates/api",
-    # "crates/bot", # Temporarily excluded - requires Solana SDK
+    # "crates/collector", - DISABLED to fix build conflict
+    # "crates/api",       - DISABLED to fix build conflict
+    "crates/bot",
 ]
 resolver = "2"
 
@@ -17,8 +17,8 @@ license = "MIT"
 # Async Runtime
 tokio = { version = "1", features = ["full"] }
 
-# Serialization - cap serde to avoid serde_core experimental feature
-serde = { version = ">=1.0.100, <1.0.227", features = ["derive"] }
+# Serialization — pinned to >=1.0.228 to align serde_core with bitflags 2.10
+serde = { version = ">=1.0.228", features = ["derive"] }
 serde_json = "1"
 
 # Time handling
@@ -34,14 +34,14 @@ anyhow = "1"
 # Async traits
 async-trait = "0.1"
 
-# Database
-sqlx = { version = "0.8", features = ["postgres", "runtime-tokio", "chrono", "rust_decimal"] }
+# Database - default-features=false and NO MACROS to avoid pulling mysql/sqlite
+# sqlx = { version = "0.7", features = ["postgres", "runtime-tokio-native-tls", "chrono", "rust_decimal"], default-features = false }
 
 # HTTP client
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", features = ["json", "native-tls-vendored", "blocking"], default-features = false }
 
-# WebSocket - upgraded to match axum 0.7's rustls requirements
-tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+# WebSocket - using native-tls to avoid rustls/zeroize conflict with Solana SDK
+tokio-tungstenite = { version = "0.20", features = ["native-tls"] }
 
 # Web framework
 axum = { version = "0.7", features = ["ws"] }
@@ -58,7 +58,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Configuration
 dotenvy = "0.15"
 
-# Solana SDK (Temporarily removed due to Windows build conflicts)
-# solana-sdk = "1.16"
-# solana-client = "1.16"
+# Solana SDK  
+solana-sdk = "1.18"
+solana-rpc-client = "1.18"
+solana-rpc-client-api = "1.18"
 bs58 = "0.5"

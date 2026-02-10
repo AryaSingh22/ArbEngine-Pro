@@ -19,6 +19,22 @@ pub struct Config {
     pub api_port: u16,
     /// Log level
     pub log_level: String,
+    /// Priority fee in micro-lamports per compute unit
+    pub priority_fee_micro_lamports: u64,
+    /// Compute unit limit per transaction
+    pub compute_unit_limit: u32,
+    /// RPC commitment level (processed, confirmed, finalized)
+    pub rpc_commitment: String,
+    /// Slippage tolerance in basis points (50 = 0.5%)
+    pub slippage_bps: u64,
+    /// Maximum retry attempts for failed transactions
+    pub max_retries: u32,
+    /// Whether to use Jito bundles for MEV protection
+    pub use_jito: bool,
+    /// Jito block engine URL
+    pub jito_block_engine_url: String,
+    /// Jito tip amount in lamports
+    pub jito_tip_lamports: u64,
 }
 
 impl Config {
@@ -45,6 +61,33 @@ impl Config {
                 .unwrap_or(8080),
             log_level: env::var("LOG_LEVEL")
                 .unwrap_or_else(|_| "info".to_string()),
+            priority_fee_micro_lamports: env::var("PRIORITY_FEE")
+                .unwrap_or_else(|_| "50000".to_string())
+                .parse()
+                .unwrap_or(50000),
+            compute_unit_limit: env::var("COMPUTE_UNIT_LIMIT")
+                .unwrap_or_else(|_| "200000".to_string())
+                .parse()
+                .unwrap_or(200000),
+            rpc_commitment: env::var("RPC_COMMITMENT")
+                .unwrap_or_else(|_| "confirmed".to_string()),
+            slippage_bps: env::var("SLIPPAGE_BPS")
+                .unwrap_or_else(|_| "50".to_string())
+                .parse()
+                .unwrap_or(50),
+            max_retries: env::var("MAX_RETRIES")
+                .unwrap_or_else(|_| "3".to_string())
+                .parse()
+                .unwrap_or(3),
+            use_jito: env::var("USE_JITO")
+                .map(|v| v == "true" || v == "1")
+                .unwrap_or(false),
+            jito_block_engine_url: env::var("JITO_BLOCK_ENGINE_URL")
+                .unwrap_or_else(|_| "https://mainnet.block-engine.jito.wtf".to_string()),
+            jito_tip_lamports: env::var("JITO_TIP_LAMPORTS")
+                .unwrap_or_else(|_| "10000".to_string())
+                .parse()
+                .unwrap_or(10000),
         })
     }
 }
@@ -59,6 +102,14 @@ impl Default for Config {
             max_price_age_seconds: 5,
             api_port: 8080,
             log_level: "info".to_string(),
+            priority_fee_micro_lamports: 50000,
+            compute_unit_limit: 200000,
+            rpc_commitment: "confirmed".to_string(),
+            slippage_bps: 50,
+            max_retries: 3,
+            use_jito: false,
+            jito_block_engine_url: "https://mainnet.block-engine.jito.wtf".to_string(),
+            jito_tip_lamports: 10000,
         }
     }
 }

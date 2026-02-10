@@ -46,12 +46,12 @@ pub enum ArbitrageError {
 }
 
 // Conditional From implementations for optional dependencies
-#[cfg(feature = "db")]
-impl From<sqlx::Error> for ArbitrageError {
-    fn from(e: sqlx::Error) -> Self {
-        ArbitrageError::Database(e.to_string())
-    }
-}
+// #[cfg(feature = "db")]
+// impl From<sqlx::Error> for ArbitrageError {
+//     fn from(e: sqlx::Error) -> Self {
+//         ArbitrageError::Database(e.to_string())
+//     }
+// }
 
 #[cfg(feature = "http")]
 impl From<reqwest::Error> for ArbitrageError {

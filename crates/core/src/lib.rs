@@ -12,7 +12,6 @@ pub mod pathfinder;
 pub mod risk;
 
 #[cfg(test)]
-#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod simulation_logs;
