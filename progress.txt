@@ -5,3 +5,5 @@
 
 - [Phase 3] Enabled `crates/api` in workspace and implemented WebSocket (`/ws`) support for real-time price & opportunity updates.
 - [Phase 3] Implemented `Historical Data Collection` integration `crates/core/src/history.rs` to persist trade outcomes (simulated & real) to JSONL files for strategy optimization.
+
+- [Phase 3] Implemented Historical Data Analysis logic in `crates/core/src/history.rs` and exposed via `/api/history/analysis` endpoint in `crates/api/src/main.rs`.

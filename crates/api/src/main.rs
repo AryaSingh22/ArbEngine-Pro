@@ -28,6 +28,7 @@ use tokio::sync::broadcast;
 
 mod ws;
 use ws::WebSocketMessage;
+use solana_arb_core::history::HistoryAnalyzer;
 
 /// Application state shared across handlers
 pub struct AppState {
@@ -247,6 +248,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/config", get(get_config))
         // Status endpoint (DRY_RUN visibility)
         .route("/api/status", get(get_status))
+        // History analysis endpoint
+        .route("/api/history/analysis", get(get_history_analysis))
         // Add CORS for frontend
         .layer(
             CorsLayer::new()
@@ -431,3 +434,18 @@ async fn get_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         "max_price_age_seconds": state.max_price_age_seconds,
     })))
 }
+
+/// Get historical trade analysis
+async fn get_history_analysis(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    // Determine file path based on mode (dry_run or live)
+    let history_file = if state.dry_run { "data/history-sim.jsonl" } else { "data/history-live.jsonl" };
+    
+    match HistoryAnalyzer::analyze(history_file) {
+        Ok(report) => Json(ApiResponse::success(report)).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR, 
+            Json(ApiResponse::<()>::error(format!("Failed to analyze history: {}", e)))
+        ).into_response(),
+    }
+}
+

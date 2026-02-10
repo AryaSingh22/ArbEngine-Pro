@@ -85,3 +85,122 @@ impl HistoryRecorder {
         }
     }
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AnalysisReport {
+    pub total_trades: usize,
+    pub successful_trades: usize,
+    pub success_rate: f64,
+    pub total_profit_usd: String,
+    pub avg_profit_usd: String,
+    pub best_pair: Option<String>,
+    pub best_route: Option<String>,
+    pub worst_route: Option<String>,
+    pub total_volume_usd: String,
+}
+
+pub struct HistoryAnalyzer;
+
+impl HistoryAnalyzer {
+    pub fn analyze(file_path: &str) -> Result<AnalysisReport, std::io::Error> {
+        let path = Path::new(file_path);
+        if !path.exists() {
+             return Ok(AnalysisReport {
+                total_trades: 0,
+                successful_trades: 0,
+                success_rate: 0.0,
+                total_profit_usd: "0.00".to_string(),
+                avg_profit_usd: "0.00".to_string(),
+                best_pair: None, 
+                best_route: None,
+                worst_route: None,
+                total_volume_usd: "0.00".to_string(),
+             });
+        }
+
+        let file = fs::File::open(path)?;
+        let reader = std::io::BufReader::new(file);
+        let mut trades: Vec<TradeRecord> = Vec::new();
+
+        use std::io::BufRead;
+        for line in reader.lines() {
+            if let Ok(line) = line {
+                if let Ok(record) = serde_json::from_str::<TradeRecord>(&line) {
+                    trades.push(record);
+                }
+            }
+        }
+
+        let total_trades = trades.len();
+        if total_trades == 0 {
+             return Ok(AnalysisReport {
+                total_trades: 0,
+                successful_trades: 0,
+                success_rate: 0.0,
+                total_profit_usd: "0.00".to_string(),
+                avg_profit_usd: "0.00".to_string(),
+                best_pair: None, 
+                best_route: None,
+                worst_route: None,
+                total_volume_usd: "0.00".to_string(),
+             });
+        }
+
+        let successful_trades = trades.iter().filter(|t| t.success).count();
+        let success_rate = if total_trades > 0 {
+            (successful_trades as f64 / total_trades as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        let mut total_profit = Decimal::ZERO;
+        let mut total_volume = Decimal::ZERO;
+        let mut pair_profit: std::collections::HashMap<String, Decimal> = std::collections::HashMap::new();
+        let mut route_profit: std::collections::HashMap<String, Decimal> = std::collections::HashMap::new();
+
+        use std::str::FromStr;
+        for trade in &trades {
+            if let Ok(profit) = Decimal::from_str(&trade.profit_usd) {
+                total_profit += profit;
+                *pair_profit.entry(trade.pair.clone()).or_default() += profit;
+                
+                let route = format!("{}->{}", trade.buy_dex, trade.sell_dex);
+                *route_profit.entry(route).or_default() += profit;
+            }
+            if let Ok(size) = Decimal::from_str(&trade.size_usd) {
+                total_volume += size;
+            }
+        }
+
+        let avg_profit = if total_trades > 0 {
+            total_profit / Decimal::from(total_trades)
+        } else {
+            Decimal::ZERO
+        };
+
+        let best_pair = pair_profit.iter()
+            .max_by(|a, b| a.1.cmp(b.1))
+            .map(|(k, _)| k.clone());
+
+        let best_route = route_profit.iter()
+            .max_by(|a, b| a.1.cmp(b.1))
+            .map(|(k, _)| k.clone());
+
+        let worst_route = route_profit.iter()
+            .min_by(|a, b| a.1.cmp(b.1))
+            .map(|(k, _)| k.clone());
+
+        Ok(AnalysisReport {
+            total_trades,
+            successful_trades,
+            success_rate,
+            total_profit_usd: total_profit.round_dp(2).to_string(),
+            avg_profit_usd: avg_profit.round_dp(4).to_string(),
+            best_pair,
+            best_route,
+            worst_route,
+            total_volume_usd: total_volume.round_dp(2).to_string(),
+        })
+    }
+}
+
