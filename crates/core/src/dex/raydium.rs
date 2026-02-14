@@ -1,5 +1,5 @@
 //! Raydium DEX Provider
-//! 
+//!
 //! Raydium is one of the largest AMM DEXs on Solana.
 //! This provider fetches pool data and calculates prices.
 
@@ -8,8 +8,8 @@ use rust_decimal::Decimal;
 use serde::Deserialize;
 use tokio::sync::mpsc;
 
-use crate::{ArbitrageError, ArbitrageResult, DexType, PriceData, TokenPair};
 use super::{DexProvider, PriceStream};
+use crate::{ArbitrageError, ArbitrageResult, DexType, PriceData, TokenPair};
 
 const RAYDIUM_API: &str = "https://api.raydium.io/v2/main/pairs";
 
@@ -35,7 +35,7 @@ struct RaydiumPair {
 impl RaydiumProvider {
     pub fn new() -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: crate::http::pool::create_optimized_client(),
         }
     }
 
@@ -64,19 +64,17 @@ impl DexProvider for RaydiumProvider {
     }
 
     async fn get_price(&self, pair: &TokenPair) -> ArbitrageResult<PriceData> {
-        let pairs: Vec<RaydiumPair> = self.client
-            .get(RAYDIUM_API)
-            .send()
-            .await?
-            .json()
-            .await?;
+        let pairs: Vec<RaydiumPair> = self.client.get(RAYDIUM_API).send().await?.json().await?;
 
         let target_name = format!("{}-{}", pair.base, pair.quote);
         let reverse_name = format!("{}-{}", pair.quote, pair.base);
 
-        let raydium_pair = pairs.iter()
+        let raydium_pair = pairs
+            .iter()
             .find(|p| p.name == target_name || p.name == reverse_name)
-            .ok_or_else(|| ArbitrageError::PriceFetch(format!("Pair {} not found on Raydium", pair)))?;
+            .ok_or_else(|| {
+                ArbitrageError::PriceFetch(format!("Pair {} not found on Raydium", pair))
+            })?;
 
         let mut price = Decimal::try_from(raydium_pair.price)
             .map_err(|e| ArbitrageError::PriceFetch(format!("Invalid price: {}", e)))?;
@@ -92,7 +90,8 @@ impl DexProvider for RaydiumProvider {
         let ask = price + spread;
 
         let mut price_data = PriceData::new(DexType::Raydium, pair.clone(), bid, ask);
-        price_data.volume_24h = Some(Decimal::try_from(raydium_pair.volume_24h).unwrap_or_default());
+        price_data.volume_24h =
+            Some(Decimal::try_from(raydium_pair.volume_24h).unwrap_or_default());
         price_data.liquidity = Some(Decimal::try_from(raydium_pair.liquidity).unwrap_or_default());
 
         Ok(price_data)
@@ -110,7 +109,8 @@ impl DexProvider for RaydiumProvider {
                             let target_name = format!("{}-{}", pair.base, pair.quote);
                             let reverse_name = format!("{}-{}", pair.quote, pair.base);
 
-                            if let Some(raydium_pair) = all_pairs.iter()
+                            if let Some(raydium_pair) = all_pairs
+                                .iter()
                                 .find(|p| p.name == target_name || p.name == reverse_name)
                             {
                                 if let Ok(mut price) = Decimal::try_from(raydium_pair.price) {
@@ -122,14 +122,12 @@ impl DexProvider for RaydiumProvider {
                                     let bid = price - spread;
                                     let ask = price + spread;
 
-                                    let mut price_data = PriceData::new(
-                                        DexType::Raydium,
-                                        pair.clone(),
-                                        bid,
-                                        ask,
-                                    );
-                                    price_data.volume_24h = Decimal::try_from(raydium_pair.volume_24h).ok();
-                                    price_data.liquidity = Decimal::try_from(raydium_pair.liquidity).ok();
+                                    let mut price_data =
+                                        PriceData::new(DexType::Raydium, pair.clone(), bid, ask);
+                                    price_data.volume_24h =
+                                        Decimal::try_from(raydium_pair.volume_24h).ok();
+                                    price_data.liquidity =
+                                        Decimal::try_from(raydium_pair.liquidity).ok();
 
                                     if tx.send(price_data).await.is_err() {
                                         return;

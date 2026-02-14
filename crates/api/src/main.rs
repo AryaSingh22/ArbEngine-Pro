@@ -9,14 +9,14 @@ use axum::{
     routing::get,
     Router,
 };
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
-use chrono::{DateTime, Utc};
-use std::collections::HashMap;
 
 use solana_arb_core::{
     arbitrage::ArbitrageDetector,
@@ -27,8 +27,8 @@ use solana_arb_core::{
 use tokio::sync::broadcast;
 
 mod ws;
-use ws::WebSocketMessage;
 use solana_arb_core::history::HistoryAnalyzer;
+use ws::WebSocketMessage;
 
 /// Application state shared across handlers
 pub struct AppState {
@@ -167,10 +167,10 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(async move {
         let pairs = default_pairs();
         let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(500));
-        
+
         loop {
             interval.tick().await;
-            
+
             // Increment heartbeat
             {
                 let mut count = collector_state.heartbeat_count.write().await;
@@ -178,34 +178,45 @@ async fn main() -> anyhow::Result<()> {
                 let mut last_scan = collector_state.last_scan_at.write().await;
                 *last_scan = Utc::now();
             }
-            
+
             for provider in &collector_state.providers {
                 let dex_name = format!("{:?}", provider.dex_type());
-                
+
                 match provider.get_prices(&pairs).await {
                     Ok(prices) => {
                         let mut detector = collector_state.detector.write().await;
                         detector.update_prices(prices.clone());
                         detector.clear_stale_prices(collector_state.max_price_age_seconds);
-                        
+
                         // Update DEX health - success
                         let mut health = collector_state.dex_health.write().await;
-                        health.insert(dex_name.clone(), DexHealthStatus {
-                            name: dex_name,
-                            last_success_at: Some(Utc::now()),
-                            consecutive_errors: 0,
-                            status: "green".to_string(),
-                        });
+                        health.insert(
+                            dex_name.clone(),
+                            DexHealthStatus {
+                                name: dex_name,
+                                last_success_at: Some(Utc::now()),
+                                consecutive_errors: 0,
+                                status: "green".to_string(),
+                            },
+                        );
 
                         // Broadcast price updates
-                        let _ = collector_state.tx.send(WebSocketMessage::PriceUpdate(prices));
-                        
+                        let _ = collector_state
+                            .tx
+                            .send(WebSocketMessage::PriceUpdate(prices));
+
                         // Check for new opportunities
-                        let new_opps = collector_state.detector.read().await.find_all_opportunities();
+                        let new_opps = collector_state
+                            .detector
+                            .read()
+                            .await
+                            .find_all_opportunities();
                         if !new_opps.is_empty() {
                             info!("🔔 Found {} opportunities", new_opps.len());
                             for opp in new_opps {
-                                let _ = collector_state.tx.send(WebSocketMessage::NewOpportunity(opp));
+                                let _ = collector_state
+                                    .tx
+                                    .send(WebSocketMessage::NewOpportunity(opp));
                             }
                         }
                     }
@@ -219,16 +230,22 @@ async fn main() -> anyhow::Result<()> {
                             status: "red".to_string(),
                         });
                         entry.consecutive_errors += 1;
-                        entry.status = if entry.consecutive_errors >= 5 { "red" } else { "yellow" }.to_string();
+                        entry.status = if entry.consecutive_errors >= 5 {
+                            "red"
+                        } else {
+                            "yellow"
+                        }
+                        .to_string();
                     }
                 }
             }
 
             validate_dex_coverage(&collector_state).await;
 
-
             // Broadcast updates
-            let _ = collector_state.tx.send(WebSocketMessage::Heartbeat(*collector_state.heartbeat_count.read().await));
+            let _ = collector_state.tx.send(WebSocketMessage::Heartbeat(
+                *collector_state.heartbeat_count.read().await,
+            ));
         }
     });
 
@@ -262,7 +279,7 @@ async fn main() -> anyhow::Result<()> {
     // Start server
     let addr = format!("0.0.0.0:{}", config.api_port);
     info!("API server listening on {}", addr);
-    
+
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     axum::serve(listener, app).await?;
 
@@ -335,18 +352,24 @@ async fn get_opportunity(
 ) -> impl IntoResponse {
     let detector = state.detector.read().await;
     let opportunities = detector.find_all_opportunities();
-    
+
     match solana_arb_core::Uuid::parse_str(&id) {
         Ok(uuid) => {
             if let Some(opp) = opportunities.iter().find(|o| o.id == uuid) {
                 Json(ApiResponse::success(opp.clone())).into_response()
             } else {
-                (StatusCode::NOT_FOUND, Json(ApiResponse::<()>::error("Opportunity not found"))).into_response()
+                (
+                    StatusCode::NOT_FOUND,
+                    Json(ApiResponse::<()>::error("Opportunity not found")),
+                )
+                    .into_response()
             }
         }
-        Err(_) => {
-            (StatusCode::BAD_REQUEST, Json(ApiResponse::<()>::error("Invalid UUID"))).into_response()
-        }
+        Err(_) => (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse::<()>::error("Invalid UUID")),
+        )
+            .into_response(),
     }
 }
 
@@ -362,7 +385,8 @@ async fn get_prices(
 
     // Filter by pair if specified
     let filtered: Vec<PriceData> = if params.base.is_some() || params.quote.is_some() {
-        result.into_iter()
+        result
+            .into_iter()
             .filter(|p| {
                 let base_match = params.base.as_ref().map_or(true, |b| &p.pair.base == b);
                 let quote_match = params.quote.as_ref().map_or(true, |q| &p.pair.quote == q);
@@ -383,20 +407,24 @@ async fn get_pair_prices(
 ) -> impl IntoResponse {
     // Parse pair string (e.g., "SOL-USDC" or "SOL/USDC")
     let parts: Vec<&str> = pair_str.split(|c| c == '-' || c == '/').collect();
-    
+
     if parts.len() != 2 {
         return (
             StatusCode::BAD_REQUEST,
-            Json(ApiResponse::<()>::error("Invalid pair format. Use BASE-QUOTE or BASE/QUOTE")),
-        ).into_response();
+            Json(ApiResponse::<()>::error(
+                "Invalid pair format. Use BASE-QUOTE or BASE/QUOTE",
+            )),
+        )
+            .into_response();
     }
 
     let pair = TokenPair::new(parts[0], parts[1]);
-    
+
     let detector = state.detector.read().await;
     let prices = detector.get_prices();
 
-    let result: Vec<_> = prices.values()
+    let result: Vec<_> = prices
+        .values()
         .filter(|p| p.pair == pair)
         .cloned()
         .collect();
@@ -420,9 +448,9 @@ async fn get_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let heartbeat_count = *state.heartbeat_count.read().await;
     let last_scan_at = *state.last_scan_at.read().await;
     let dex_health = state.dex_health.read().await;
-    
+
     let dex_statuses: Vec<_> = dex_health.values().cloned().collect();
-    
+
     Json(ApiResponse::success(serde_json::json!({
         "dry_run": state.dry_run,
         "bot_running": true,
@@ -438,14 +466,21 @@ async fn get_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 /// Get historical trade analysis
 async fn get_history_analysis(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     // Determine file path based on mode (dry_run or live)
-    let history_file = if state.dry_run { "data/history-sim.jsonl" } else { "data/history-live.jsonl" };
-    
+    let history_file = if state.dry_run {
+        "data/history-sim.jsonl"
+    } else {
+        "data/history-live.jsonl"
+    };
+
     match HistoryAnalyzer::analyze(history_file) {
         Ok(report) => Json(ApiResponse::success(report)).into_response(),
         Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR, 
-            Json(ApiResponse::<()>::error(format!("Failed to analyze history: {}", e)))
-        ).into_response(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse::<()>::error(format!(
+                "Failed to analyze history: {}",
+                e
+            ))),
+        )
+            .into_response(),
     }
 }
-

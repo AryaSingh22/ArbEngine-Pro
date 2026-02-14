@@ -11,6 +11,9 @@ pub enum DexType {
     Raydium,
     Orca,
     Jupiter,
+    Lifinity,
+    Meteora,
+    Phoenix,
 }
 
 impl DexType {
@@ -20,6 +23,9 @@ impl DexType {
             DexType::Raydium => Decimal::new(25, 4),  // 0.25%
             DexType::Orca => Decimal::new(30, 4),     // 0.30%
             DexType::Jupiter => Decimal::new(0, 4),   // Variable, aggregator
+            DexType::Lifinity => Decimal::new(10, 4), // 0.10% (approx)
+            DexType::Meteora => Decimal::new(10, 4),  // Dynamic, varies
+            DexType::Phoenix => Decimal::new(5, 4),   // 0.05% (maker/taker varies)
         }
     }
 
@@ -29,12 +35,22 @@ impl DexType {
             DexType::Raydium => "Raydium",
             DexType::Orca => "Orca",
             DexType::Jupiter => "Jupiter",
+            DexType::Lifinity => "Lifinity",
+            DexType::Meteora => "Meteora",
+            DexType::Phoenix => "Phoenix",
         }
     }
 
     /// Returns all supported DEXs in priority order.
     pub fn all() -> &'static [DexType] {
-        const ALL: &[DexType] = &[DexType::Raydium, DexType::Orca, DexType::Jupiter];
+        const ALL: &[DexType] = &[
+            DexType::Raydium,
+            DexType::Orca,
+            DexType::Jupiter,
+            DexType::Lifinity,
+            DexType::Meteora,
+            DexType::Phoenix,
+        ];
         ALL
     }
 }
@@ -96,12 +112,7 @@ pub struct PriceData {
 }
 
 impl PriceData {
-    pub fn new(
-        dex: DexType,
-        pair: TokenPair,
-        bid: Decimal,
-        ask: Decimal,
-    ) -> Self {
+    pub fn new(dex: DexType, pair: TokenPair, bid: Decimal, ask: Decimal) -> Self {
         let mid_price = (bid + ask) / Decimal::from(2);
         Self {
             dex,
@@ -182,10 +193,10 @@ pub struct ArbitrageConfig {
 impl Default for ArbitrageConfig {
     fn default() -> Self {
         Self {
-            min_profit_threshold: Decimal::new(50, 4),    // 0.5%
-            max_position_size: Decimal::from(1000),       // $1,000
-            slippage_tolerance: Decimal::new(100, 4),     // 1%
-            solana_tx_fee: Decimal::new(5, 6),            // 0.000005 SOL
+            min_profit_threshold: Decimal::new(50, 4), // 0.5%
+            max_position_size: Decimal::from(1000),    // $1,000
+            slippage_tolerance: Decimal::new(100, 4),  // 1%
+            solana_tx_fee: Decimal::new(5, 6),         // 0.000005 SOL
         }
     }
 }

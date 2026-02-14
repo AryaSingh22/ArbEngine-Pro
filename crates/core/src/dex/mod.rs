@@ -55,7 +55,7 @@ pub trait DexProvider: Send + Sync {
 
 /// Manager for multiple DEX providers
 pub struct DexManager {
-    providers: Vec<Box<dyn DexProvider>>,
+    providers: Vec<std::sync::Arc<dyn DexProvider>>,
 }
 
 impl DexManager {
@@ -66,12 +66,12 @@ impl DexManager {
     }
 
     /// Add a DEX provider to the manager
-    pub fn add_provider(&mut self, provider: Box<dyn DexProvider>) {
+    pub fn add_provider(&mut self, provider: std::sync::Arc<dyn DexProvider>) {
         self.providers.push(provider);
     }
 
     /// Get all registered providers
-    pub fn providers(&self) -> &[Box<dyn DexProvider>] {
+    pub fn providers(&self) -> &[std::sync::Arc<dyn DexProvider>] {
         &self.providers
     }
 
@@ -82,15 +82,15 @@ impl DexManager {
             tracing::info!("➡️ Calling price fetch for DEX: {:?}", provider.dex_type());
             match provider.get_price(pair).await {
                 Ok(price) => {
-                    tracing::info!("⬅️ DEX {:?} returned price for {}", provider.dex_type(), pair);
+                    tracing::info!(
+                        "⬅️ DEX {:?} returned price for {}",
+                        provider.dex_type(),
+                        pair
+                    );
                     prices.push(price);
                 }
                 Err(e) => {
-                    tracing::warn!(
-                        "❌ DEX {:?} fetch error: {}",
-                        provider.dex_type(),
-                        e
-                    );
+                    tracing::warn!("❌ DEX {:?} fetch error: {}", provider.dex_type(), e);
                 }
             }
         }

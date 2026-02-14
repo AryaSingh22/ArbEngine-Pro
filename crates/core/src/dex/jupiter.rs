@@ -1,5 +1,5 @@
 //! Jupiter DEX Provider
-//! 
+//!
 //! Jupiter is a DEX aggregator that routes trades through multiple DEXs
 //! to find the best prices. We use their Price API for price data.
 
@@ -9,8 +9,8 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 
-use crate::{ArbitrageError, ArbitrageResult, DexType, PriceData, TokenPair};
 use super::{DexProvider, PriceStream};
+use crate::{ArbitrageError, ArbitrageResult, DexType, PriceData, TokenPair};
 
 const JUPITER_PRICE_API: &str = "https://price.jup.ag/v6/price";
 
@@ -39,17 +39,41 @@ impl JupiterProvider {
     pub fn new() -> Self {
         let mut token_mints = HashMap::new();
         // Common Solana tokens
-        token_mints.insert("SOL".to_string(), "So11111111111111111111111111111111111111112".to_string());
-        token_mints.insert("USDC".to_string(), "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".to_string());
-        token_mints.insert("USDT".to_string(), "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB".to_string());
-        token_mints.insert("RAY".to_string(), "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R".to_string());
-        token_mints.insert("SRM".to_string(), "SRMuApVNdxXokk5GT7XD5cUUgXMBCoAz2LHeuAoKWRt".to_string());
-        token_mints.insert("BONK".to_string(), "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263".to_string());
-        token_mints.insert("JUP".to_string(), "JUPyiwrYJFskUPiHa7hkeR8VUtAe6poCFFRLnWo6h7rL".to_string());
-        token_mints.insert("ORCA".to_string(), "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE".to_string());
-        
+        token_mints.insert(
+            "SOL".to_string(),
+            "So11111111111111111111111111111111111111112".to_string(),
+        );
+        token_mints.insert(
+            "USDC".to_string(),
+            "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".to_string(),
+        );
+        token_mints.insert(
+            "USDT".to_string(),
+            "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB".to_string(),
+        );
+        token_mints.insert(
+            "RAY".to_string(),
+            "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R".to_string(),
+        );
+        token_mints.insert(
+            "SRM".to_string(),
+            "SRMuApVNdxXokk5GT7XD5cUUgXMBCoAz2LHeuAoKWRt".to_string(),
+        );
+        token_mints.insert(
+            "BONK".to_string(),
+            "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263".to_string(),
+        );
+        token_mints.insert(
+            "JUP".to_string(),
+            "JUPyiwrYJFskUPiHa7hkeR8VUtAe6poCFFRLnWo6h7rL".to_string(),
+        );
+        token_mints.insert(
+            "ORCA".to_string(),
+            "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE".to_string(),
+        );
+
         Self {
-            client: reqwest::Client::new(),
+            client: crate::http::pool::create_optimized_client(),
             token_mints,
         }
     }
@@ -78,22 +102,24 @@ impl DexProvider for JupiterProvider {
     }
 
     async fn get_price(&self, pair: &TokenPair) -> ArbitrageResult<PriceData> {
-        let base_mint = self.get_mint(&pair.base)
+        let base_mint = self
+            .get_mint(&pair.base)
             .ok_or_else(|| ArbitrageError::Config(format!("Unknown token: {}", pair.base)))?;
-        
-        let quote_mint = self.get_mint(&pair.quote)
+
+        let quote_mint = self
+            .get_mint(&pair.quote)
             .ok_or_else(|| ArbitrageError::Config(format!("Unknown token: {}", pair.quote)))?;
 
-        let url = format!("{}?ids={}&vsToken={}", JUPITER_PRICE_API, base_mint, quote_mint);
-        
-        let response: JupiterPriceResponse = self.client
-            .get(&url)
-            .send()
-            .await?
-            .json()
-            .await?;
+        let url = format!(
+            "{}?ids={}&vsToken={}",
+            JUPITER_PRICE_API, base_mint, quote_mint
+        );
 
-        let token_price = response.data.get(base_mint)
+        let response: JupiterPriceResponse = self.client.get(&url).send().await?.json().await?;
+
+        let token_price = response
+            .data
+            .get(base_mint)
             .ok_or_else(|| ArbitrageError::PriceFetch("No price data returned".to_string()))?;
 
         let price = Decimal::try_from(token_price.price)
@@ -124,8 +150,11 @@ impl DexProvider for JupiterProvider {
                         None => continue,
                     };
 
-                    let url = format!("{}?ids={}&vsToken={}", JUPITER_PRICE_API, base_mint, quote_mint);
-                    
+                    let url = format!(
+                        "{}?ids={}&vsToken={}",
+                        JUPITER_PRICE_API, base_mint, quote_mint
+                    );
+
                     if let Ok(response) = client.get(&url).send().await {
                         if let Ok(data) = response.json::<JupiterPriceResponse>().await {
                             if let Some(token_price) = data.data.get(base_mint) {
@@ -133,14 +162,10 @@ impl DexProvider for JupiterProvider {
                                     let spread = price * Decimal::new(1, 4);
                                     let bid = price - spread;
                                     let ask = price + spread;
-                                    
-                                    let price_data = PriceData::new(
-                                        DexType::Jupiter,
-                                        pair.clone(),
-                                        bid,
-                                        ask,
-                                    );
-                                    
+
+                                    let price_data =
+                                        PriceData::new(DexType::Jupiter, pair.clone(), bid, ask);
+
                                     if tx.send(price_data).await.is_err() {
                                         return; // Channel closed
                                     }
@@ -149,7 +174,7 @@ impl DexProvider for JupiterProvider {
                         }
                     }
                 }
-                
+
                 // Poll every 500ms for updates
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
             }
@@ -159,7 +184,10 @@ impl DexProvider for JupiterProvider {
     }
 
     async fn health_check(&self) -> ArbitrageResult<bool> {
-        let url = format!("{}?ids=So11111111111111111111111111111111111111112", JUPITER_PRICE_API);
+        let url = format!(
+            "{}?ids=So11111111111111111111111111111111111111112",
+            JUPITER_PRICE_API
+        );
         let response = self.client.get(&url).send().await?;
         Ok(response.status().is_success())
     }

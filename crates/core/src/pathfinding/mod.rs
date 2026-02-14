@@ -6,9 +6,12 @@
 use rust_decimal::Decimal;
 use std::collections::{HashMap, HashSet};
 
-use crate::{DexType, PriceData};
+#[cfg(test)]
 #[cfg(test)]
 use crate::TokenPair;
+use crate::{DexType, PriceData};
+
+pub mod simd_profit;
 
 /// Represents an edge in the trading graph
 #[derive(Debug, Clone)]
@@ -16,9 +19,9 @@ pub struct TradingEdge {
     pub from_token: String,
     pub to_token: String,
     pub dex: DexType,
-    pub rate: Decimal,      // Exchange rate (how much to_token you get per from_token)
+    pub rate: Decimal, // Exchange rate (how much to_token you get per from_token)
     pub liquidity: Decimal, // Available liquidity
-    pub fee: Decimal,       // Trading fee percentage
+    pub fee: Decimal,  // Trading fee percentage
 }
 
 impl TradingEdge {
@@ -93,7 +96,7 @@ impl PathFinder {
         let base = price.pair.base.clone();
         let quote = price.pair.quote.clone();
         let fee = price.dex.fee_percentage();
-        
+
         self.tokens.insert(base.clone());
         self.tokens.insert(quote.clone());
 
@@ -126,7 +129,7 @@ impl PathFinder {
     /// Find all triangular arbitrage paths starting and ending at the given token
     pub fn find_triangular_paths(&self, start_token: &str) -> Vec<TradingPath> {
         let mut paths = Vec::new();
-        
+
         if !self.tokens.contains(start_token) {
             return paths;
         }
@@ -217,9 +220,10 @@ impl PathFinder {
         // Deduplicate (same cycle can be found from different starting points)
         all_paths.dedup_by(|a, b| {
             a.edges.len() == b.edges.len()
-                && a.edges.iter().zip(b.edges.iter()).all(|(ea, eb)| {
-                    ea.from_token == eb.from_token && ea.to_token == eb.to_token
-                })
+                && a.edges
+                    .iter()
+                    .zip(b.edges.iter())
+                    .all(|(ea, eb)| ea.from_token == eb.from_token && ea.to_token == eb.to_token)
         });
 
         all_paths.sort_by(|a, b| b.profit_ratio.cmp(&a.profit_ratio));
@@ -254,13 +258,13 @@ mod tests {
         // SOL -> USDC: 1 SOL = 100 USDC (bid)
         // USDC -> RAY: 1 USDC = 0.5 RAY (bid)
         // RAY -> SOL: 1 RAY = 2.1 SOL (bid) <-- Mispricing creates opportunity
-        
+
         finder.add_price(&make_price(DexType::Raydium, "SOL", "USDC", 100.0, 100.1));
         finder.add_price(&make_price(DexType::Orca, "RAY", "USDC", 2.0, 2.01)); // 1 USDC = 0.5 RAY
         finder.add_price(&make_price(DexType::Jupiter, "RAY", "SOL", 0.0476, 0.048)); // 1 RAY = ~21 SOL mispriced!
 
         let paths = finder.find_triangular_paths("SOL");
-        
+
         // Should find profitable path
         println!("Found {} paths", paths.len());
         for path in &paths {
@@ -282,9 +286,12 @@ mod tests {
         finder.add_price(&make_price(DexType::Jupiter, "RAY", "SOL", 0.02, 0.0201));
 
         let paths = finder.find_triangular_paths("SOL");
-        
+
         // With fair prices, triangular arbitrage profit should be <= fees
-        let profitable: Vec<_> = paths.into_iter().filter(|p| p.profit_percentage() > Decimal::from(1)).collect();
+        let profitable: Vec<_> = paths
+            .into_iter()
+            .filter(|p| p.profit_percentage() > Decimal::from(1))
+            .collect();
         assert!(profitable.is_empty() || profitable[0].profit_percentage() < Decimal::from(1));
     }
 }

@@ -8,7 +8,10 @@ name = "bot"
 path = "src/main.rs"
 
 [dependencies]
-solana-arb-core = { path = "../core", features = ["http"] }
+solana-arb-core = { path = "../core", features = ["http", "ws", "db"] }
+solana-arb-flash-loans = { path = "../flash-loans" }
+solana-arb-dex-plugins = { path = "../dex-plugins" }
+solana-arb-strategies = { path = "../strategies" }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
@@ -26,3 +29,7 @@ solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
 rand = "0.8"
+prometheus = "0.13"
+axum = { version = "0.7", features = ["macros"] }
+spl-token = { version = "4.0", features = ["no-entrypoint"] }
+spl-associated-token-account = { version = "2.0", features = ["no-entrypoint"] }

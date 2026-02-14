@@ -1,5 +1,5 @@
 //! Orca DEX Provider
-//! 
+//!
 //! Orca is a popular AMM DEX on Solana with Whirlpools for concentrated liquidity.
 
 use async_trait::async_trait;
@@ -7,8 +7,8 @@ use rust_decimal::Decimal;
 use serde::Deserialize;
 use tokio::sync::mpsc;
 
-use crate::{ArbitrageError, ArbitrageResult, DexType, PriceData, TokenPair};
 use super::{DexProvider, PriceStream};
+use crate::{ArbitrageError, ArbitrageResult, DexType, PriceData, TokenPair};
 
 const ORCA_WHIRLPOOL_API: &str = "https://api.mainnet.orca.so/v1/whirlpool/list";
 
@@ -45,7 +45,7 @@ struct OrcaToken {
 impl OrcaProvider {
     pub fn new() -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: crate::http::pool::create_optimized_client(),
         }
     }
 }
@@ -63,19 +63,24 @@ impl DexProvider for OrcaProvider {
     }
 
     async fn get_price(&self, pair: &TokenPair) -> ArbitrageResult<PriceData> {
-        let response: OrcaWhirlpoolList = self.client
+        let response: OrcaWhirlpoolList = self
+            .client
             .get(ORCA_WHIRLPOOL_API)
             .send()
             .await?
             .json()
             .await?;
 
-        let whirlpool = response.whirlpools.iter()
+        let whirlpool = response
+            .whirlpools
+            .iter()
             .find(|w| {
-                (w.token_a.symbol == pair.base && w.token_b.symbol == pair.quote) ||
-                (w.token_a.symbol == pair.quote && w.token_b.symbol == pair.base)
+                (w.token_a.symbol == pair.base && w.token_b.symbol == pair.quote)
+                    || (w.token_a.symbol == pair.quote && w.token_b.symbol == pair.base)
             })
-            .ok_or_else(|| ArbitrageError::PriceFetch(format!("Pair {} not found on Orca", pair)))?;
+            .ok_or_else(|| {
+                ArbitrageError::PriceFetch(format!("Pair {} not found on Orca", pair))
+            })?;
 
         let mut price = Decimal::try_from(whirlpool.price)
             .map_err(|e| ArbitrageError::PriceFetch(format!("Invalid price: {}", e)))?;
@@ -91,7 +96,7 @@ impl DexProvider for OrcaProvider {
         let ask = price + spread;
 
         let mut price_data = PriceData::new(DexType::Orca, pair.clone(), bid, ask);
-        
+
         if let Some(vol) = whirlpool.volume_24h {
             price_data.volume_24h = Some(Decimal::try_from(vol).unwrap_or_default());
         }
@@ -112,8 +117,9 @@ impl DexProvider for OrcaProvider {
                     if let Ok(data) = response.json::<OrcaWhirlpoolList>().await {
                         for pair in &pairs {
                             if let Some(whirlpool) = data.whirlpools.iter().find(|w| {
-                                (w.token_a.symbol == pair.base && w.token_b.symbol == pair.quote) ||
-                                (w.token_a.symbol == pair.quote && w.token_b.symbol == pair.base)
+                                (w.token_a.symbol == pair.base && w.token_b.symbol == pair.quote)
+                                    || (w.token_a.symbol == pair.quote
+                                        && w.token_b.symbol == pair.base)
                             }) {
                                 if let Ok(mut price) = Decimal::try_from(whirlpool.price) {
                                     if whirlpool.token_a.symbol == pair.quote {
@@ -124,13 +130,9 @@ impl DexProvider for OrcaProvider {
                                     let bid = price - spread;
                                     let ask = price + spread;
 
-                                    let mut price_data = PriceData::new(
-                                        DexType::Orca,
-                                        pair.clone(),
-                                        bid,
-                                        ask,
-                                    );
-                                    
+                                    let mut price_data =
+                                        PriceData::new(DexType::Orca, pair.clone(), bid, ask);
+
                                     if let Some(vol) = whirlpool.volume_24h {
                                         price_data.volume_24h = Decimal::try_from(vol).ok();
                                     }

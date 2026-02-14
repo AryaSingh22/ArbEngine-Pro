@@ -1,10 +1,10 @@
 //! Tests for arbitrage detection and types
 
-use rust_decimal::Decimal;
 use crate::{
     arbitrage::ArbitrageDetector,
     types::{ArbitrageConfig, DexType, PriceData, TokenPair},
 };
+use rust_decimal::Decimal;
 
 /// Helper to create test price data
 fn make_price(dex: DexType, base: &str, quote: &str, bid: f64, ask: f64) -> PriceData {
@@ -31,8 +31,8 @@ mod types_tests {
     #[test]
     fn test_dex_type_fees() {
         assert_eq!(DexType::Raydium.fee_percentage(), Decimal::new(25, 4)); // 0.25%
-        assert_eq!(DexType::Orca.fee_percentage(), Decimal::new(30, 4));    // 0.30%
-        assert_eq!(DexType::Jupiter.fee_percentage(), Decimal::new(0, 4));  // 0%
+        assert_eq!(DexType::Orca.fee_percentage(), Decimal::new(30, 4)); // 0.30%
+        assert_eq!(DexType::Jupiter.fee_percentage(), Decimal::new(0, 4)); // 0%
     }
 
     #[test]
@@ -83,12 +83,15 @@ mod arbitrage_tests {
 
         // Raydium: ask $100 (buy here)
         detector.update_price(make_price(DexType::Raydium, "SOL", "USDC", 99.9, 100.0));
-        
+
         // Orca: bid $102 (sell here) - 2% difference
         detector.update_price(make_price(DexType::Orca, "SOL", "USDC", 102.0, 102.1));
 
         let opportunities = detector.find_opportunities(&pair);
-        assert!(!opportunities.is_empty(), "Should find arbitrage opportunity");
+        assert!(
+            !opportunities.is_empty(),
+            "Should find arbitrage opportunity"
+        );
 
         let best = &opportunities[0];
         assert_eq!(best.buy_dex, DexType::Raydium);
@@ -110,7 +113,10 @@ mod arbitrage_tests {
         detector.update_price(make_price(DexType::Orca, "SOL", "USDC", 101.0, 101.1));
 
         let opportunities = detector.find_opportunities(&pair);
-        assert!(opportunities.is_empty(), "Should not find opportunity below threshold");
+        assert!(
+            opportunities.is_empty(),
+            "Should not find opportunity below threshold"
+        );
     }
 
     #[test]
@@ -123,7 +129,7 @@ mod arbitrage_tests {
         detector.update_price(make_price(DexType::Jupiter, "SOL", "USDC", 102.0, 102.1));
 
         let opportunities = detector.find_opportunities(&pair);
-        
+
         // Should find multiple opportunities: RAY->ORC, RAY->JUP, ORC->JUP
         assert!(opportunities.len() >= 2);
     }
@@ -131,12 +137,12 @@ mod arbitrage_tests {
     #[test]
     fn test_clear_stale_prices() {
         let mut detector = create_detector_with_low_threshold();
-        
+
         detector.update_price(make_price(DexType::Raydium, "SOL", "USDC", 100.0, 100.1));
-        
+
         // Clear prices older than 0 seconds (all prices)
         detector.clear_stale_prices(0);
-        
+
         assert!(detector.get_prices().is_empty());
     }
 
@@ -148,12 +154,15 @@ mod arbitrage_tests {
         detector.update_price(make_price(DexType::Raydium, "SOL", "USDC", 99.9, 100.0));
         detector.update_price(make_price(DexType::Orca, "SOL", "USDC", 102.0, 102.1));
 
-        // RAY/USDC pair  
+        // RAY/USDC pair
         detector.update_price(make_price(DexType::Raydium, "RAY", "USDC", 1.99, 2.0));
         detector.update_price(make_price(DexType::Jupiter, "RAY", "USDC", 2.1, 2.11));
 
         let all = detector.find_all_opportunities();
-        assert!(all.len() >= 2, "Should find opportunities across multiple pairs");
+        assert!(
+            all.len() >= 2,
+            "Should find opportunities across multiple pairs"
+        );
     }
 
     #[test]
@@ -171,7 +180,9 @@ mod arbitrage_tests {
 
         let opportunities = detector.find_opportunities(&TokenPair::new("SOL", "USDC"));
         assert!(
-            opportunities.iter().all(|opp| opp.buy_dex != DexType::Raydium),
+            opportunities
+                .iter()
+                .all(|opp| opp.buy_dex != DexType::Raydium),
             "Stale prices should not contribute to opportunities"
         );
     }

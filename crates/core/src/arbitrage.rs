@@ -1,11 +1,11 @@
 //! Arbitrage Detection Engine
-//! 
+//!
 //! This module identifies arbitrage opportunities by comparing prices
 //! across different DEXs for the same trading pair.
 
+use chrono::Utc;
 use rust_decimal::Decimal;
 use std::collections::HashMap;
-use chrono::Utc;
 
 use crate::{ArbitrageConfig, ArbitrageOpportunity, DexType, PriceData, TokenPair, Uuid};
 
@@ -44,9 +44,7 @@ impl ArbitrageDetector {
         // Get all prices for this pair from different DEXs
         let prices: Vec<_> = [DexType::Raydium, DexType::Orca, DexType::Jupiter]
             .iter()
-            .filter_map(|dex| {
-                self.price_cache.get(&(pair.clone(), *dex))
-            })
+            .filter_map(|dex| self.price_cache.get(&(pair.clone(), *dex)))
             .collect();
 
         // Compare all pairs of DEXs
@@ -71,7 +69,11 @@ impl ArbitrageDetector {
     }
 
     /// Check if there's an arbitrage opportunity between two prices
-    fn check_opportunity(&self, buy_from: &PriceData, sell_to: &PriceData) -> Option<ArbitrageOpportunity> {
+    fn check_opportunity(
+        &self,
+        buy_from: &PriceData,
+        sell_to: &PriceData,
+    ) -> Option<ArbitrageOpportunity> {
         // Buy at ask price from buy_from, sell at bid price to sell_to
         let buy_price = buy_from.ask;
         let sell_price = sell_to.bid;
@@ -115,7 +117,8 @@ impl ArbitrageDetector {
     /// Find all profitable opportunities across all cached pairs
     pub fn find_all_opportunities(&self) -> Vec<ArbitrageOpportunity> {
         // Get unique pairs from cache
-        let pairs: Vec<_> = self.price_cache
+        let pairs: Vec<_> = self
+            .price_cache
             .keys()
             .map(|(pair, _)| pair.clone())
             .collect::<std::collections::HashSet<_>>()
@@ -141,9 +144,8 @@ impl ArbitrageDetector {
     /// Clear old prices from cache
     pub fn clear_stale_prices(&mut self, max_age_seconds: i64) {
         let now = Utc::now();
-        self.price_cache.retain(|_, price| {
-            (now - price.timestamp).num_seconds() < max_age_seconds
-        });
+        self.price_cache
+            .retain(|_, price| (now - price.timestamp).num_seconds() < max_age_seconds);
     }
 }
 
@@ -188,19 +190,24 @@ mod tests {
         ));
 
         let opportunities = detector.find_opportunities(&pair);
-        
+
         // Should find opportunity: buy on Raydium at 100.10, sell on Orca at 101
         // Gross: (101 - 100.10) / 100.10 = 0.899%
         // Fees: 0.25% + 0.30% = 0.55%
         // Net: 0.899% - 0.55% = 0.349% (below 0.5% threshold)
-        
+
         // With default 0.5% threshold, this might not be profitable enough
         // Let's check the logic works by looking at what was detected
         println!("Found {} opportunities", opportunities.len());
         for opp in &opportunities {
             println!(
                 "Buy {} at {} on {}, sell at {} on {} - Net: {}%",
-                opp.pair, opp.buy_price, opp.buy_dex, opp.sell_price, opp.sell_dex, opp.net_profit_pct
+                opp.pair,
+                opp.buy_price,
+                opp.buy_dex,
+                opp.sell_price,
+                opp.sell_dex,
+                opp.net_profit_pct
             );
         }
     }
@@ -232,8 +239,11 @@ mod tests {
         ));
 
         let opportunities = detector.find_opportunities(&pair);
-        assert!(!opportunities.is_empty(), "Should find arbitrage opportunity");
-        
+        assert!(
+            !opportunities.is_empty(),
+            "Should find arbitrage opportunity"
+        );
+
         let best = &opportunities[0];
         assert_eq!(best.buy_dex, DexType::Raydium);
         assert_eq!(best.sell_dex, DexType::Orca);

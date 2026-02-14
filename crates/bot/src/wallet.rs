@@ -4,9 +4,9 @@
 //! Supports SDK Keypairs for live signing while retaining simulated defaults.
 
 use anyhow::{anyhow, Result};
+use solana_sdk::signature::{Keypair, Signer};
 use std::env;
 use tracing::{info, warn};
-use solana_sdk::signature::{Keypair, Signer};
 
 /// Wallet wrapper for simulation
 pub struct Wallet {
@@ -21,19 +21,31 @@ impl Wallet {
 
         let (pubkey, keypair) = if let Some(pk) = pk_str {
             if pk.is_empty() {
-                ("SimulatedWallet1111111111111111111111111111111".to_string(), None)
+                (
+                    "SimulatedWallet1111111111111111111111111111111".to_string(),
+                    None,
+                )
             } else {
                 match Self::parse_keypair(&pk) {
                     Ok(kp) => (kp.pubkey().to_string(), Some(kp)),
                     Err(err) => {
-                        warn!("Failed to parse PRIVATE_KEY: {}. Using simulated wallet.", err);
-                        ("SimulatedWallet1111111111111111111111111111111".to_string(), None)
+                        warn!(
+                            "Failed to parse PRIVATE_KEY: {}. Using simulated wallet.",
+                            err
+                        );
+                        (
+                            "SimulatedWallet1111111111111111111111111111111".to_string(),
+                            None,
+                        )
                     }
                 }
             }
         } else {
             warn!("PRIVATE_KEY not set. Using simulated wallet.");
-            ("SimulatedWallet1111111111111111111111111111111".to_string(), None)
+            (
+                "SimulatedWallet1111111111111111111111111111111".to_string(),
+                None,
+            )
         };
 
         info!("Wallet loaded: {}", pubkey);

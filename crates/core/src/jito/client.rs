@@ -1,20 +1,9 @@
-//! Jito MEV Protection Module
-//!
-//! Submits transactions as Jito bundles to protect against MEV/sandwich attacks.
-//! This is an optional module — enable via USE_JITO=true in .env.
-//!
-//! How it works:
-//! - Instead of sending transactions directly to the RPC, we send them to
-//!   Jito's block engine as a "bundle" with a tip to the validator.
-//! - The validator processes the bundle atomically, preventing other transactions
-//!   from being inserted between our swap legs.
-
 use anyhow::{anyhow, Result};
-use base64::engine::general_purpose::STANDARD as BASE64_ENGINE;
-use base64::Engine;
+use rand::seq::SliceRandom;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn, debug};
+use std::time::Duration;
+use tracing::{debug, info, warn};
 
 /// Jito block engine client for bundle submission
 #[derive(Debug, Clone)]
@@ -46,16 +35,16 @@ struct BundleError {
 impl JitoClient {
     pub fn new(block_engine_url: &str, tip_lamports: u64) -> Self {
         Self {
-            client: Client::new(),
+            client: Client::builder()
+                .timeout(Duration::from_secs(5))
+                .build()
+                .unwrap_or_default(),
             block_engine_url: block_engine_url.to_string(),
             tip_lamports,
         }
     }
 
     /// Submit a transaction as a Jito bundle
-    ///
-    /// The transaction should already be signed. This wraps it in a bundle
-    /// and sends it to the Jito block engine.
     pub async fn send_bundle(&self, signed_tx_base64: &str) -> Result<String> {
         info!(
             "📦 Submitting Jito bundle (tip: {} lamports) to {}",
@@ -72,16 +61,16 @@ impl JitoClient {
         let url = format!("{}/api/v1/bundles", self.block_engine_url);
         debug!("Jito bundle endpoint: {}", url);
 
-        let response = self.client
-            .post(&url)
-            .json(&bundle_req)
-            .send()
-            .await?;
+        let response = self.client.post(&url).json(&bundle_req).send().await?;
 
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await?;
-            return Err(anyhow!("Jito bundle submission failed ({}): {}", status, error_text));
+            return Err(anyhow!(
+                "Jito bundle submission failed ({}): {}",
+                status,
+                error_text
+            ));
         }
 
         let bundle_resp: BundleResponse = response.json().await?;
@@ -110,6 +99,25 @@ impl JitoClient {
                 Ok(false)
             }
         }
+    }
+
+    /// Get random tip account (Placeholder - normally fetched from Jito API)
+    pub async fn get_tip_account(&self) -> Result<String> {
+        // List of common Jito tip accounts
+        let tip_accounts = vec![
+            "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
+            "HFqU5x63VTqvQss8hp11i4wVV8bD44Puy60pxTKAW4PH",
+            "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+            "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
+            "DfXygSm4jCyNCyb3qzK6966vGgy5tQSZHarris11tc66",
+            "ADuUkR4ykG49cvq5RTu3TRLpVIUwDiIHjYyC1E1AtDyV",
+            "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
+            "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnIzKZ6jJ",
+        ];
+
+        use rand::seq::SliceRandom;
+        let mut rng = rand::thread_rng();
+        Ok(tip_accounts.choose(&mut rng).unwrap().to_string())
     }
 
     /// Get the tip amount in lamports

@@ -2,11 +2,11 @@
 //!
 //! Defines the traits for interacting with flash loan providers on Solana.
 
-use solana_sdk::pubkey::Pubkey;
-use solana_sdk::instruction::Instruction;
-use rust_decimal::Decimal;
-use async_trait::async_trait;
 use crate::error::ArbitrageResult;
+use async_trait::async_trait;
+use rust_decimal::Decimal;
+use solana_sdk::instruction::Instruction;
+use solana_sdk::pubkey::Pubkey;
 
 #[derive(Debug, Clone)]
 pub struct FlashLoanQuote {
@@ -22,7 +22,11 @@ pub trait FlashLoanProvider: Send + Sync {
     fn name(&self) -> &'static str;
 
     /// Get a quote for a flash loan
-    async fn get_quote(&self, token_mint: Pubkey, amount: Decimal) -> ArbitrageResult<FlashLoanQuote>;
+    async fn get_quote(
+        &self,
+        token_mint: Pubkey,
+        amount: Decimal,
+    ) -> ArbitrageResult<FlashLoanQuote>;
 
     /// Build instructions to borrow funds
     fn build_borrow_ix(&self, quote: &FlashLoanQuote) -> ArbitrageResult<Vec<Instruction>>;
@@ -51,12 +55,16 @@ impl FlashLoanProvider for MockFlashLoanProvider {
         "MockProvider"
     }
 
-    async fn get_quote(&self, token_mint: Pubkey, amount: Decimal) -> ArbitrageResult<FlashLoanQuote> {
+    async fn get_quote(
+        &self,
+        token_mint: Pubkey,
+        amount: Decimal,
+    ) -> ArbitrageResult<FlashLoanQuote> {
         // Flat 0.09% fee (9 basis points), typical for Solend/marginfi
         // 9 / 10000 = 0.0009
-        let fee_rate = Decimal::new(9, 4); 
+        let fee_rate = Decimal::new(9, 4);
         let fee = amount * fee_rate;
-        
+
         Ok(FlashLoanQuote {
             provider_name: self.name.clone(),
             token_mint,
@@ -88,7 +96,10 @@ mod tests {
         // Use a dummy pubkey
         let token = Pubkey::new_from_array([1; 32]);
 
-        let quote = provider.get_quote(token, amount).await.expect("Failed to get quote");
+        let quote = provider
+            .get_quote(token, amount)
+            .await
+            .expect("Failed to get quote");
 
         assert_eq!(quote.provider_name, "Solend-Mock");
         assert_eq!(quote.amount, amount);

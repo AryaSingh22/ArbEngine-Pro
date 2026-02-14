@@ -1,10 +1,10 @@
-use crate::types::{ArbitrageOpportunity};
+use crate::types::ArbitrageOpportunity;
+use chrono::Utc;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::Path;
-use chrono::Utc;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TradeRecord {
@@ -53,7 +53,11 @@ impl HistoryRecorder {
         let record = TradeRecord {
             timestamp: Utc::now().to_rfc3339(),
             session_id: self.session_id.clone(),
-            trade_type: if is_dry_run { "SIMULATION".to_string() } else { "REAL".to_string() },
+            trade_type: if is_dry_run {
+                "SIMULATION".to_string()
+            } else {
+                "REAL".to_string()
+            },
             pair: opp.pair.symbol(),
             buy_dex: opp.buy_dex.display_name().to_string(),
             sell_dex: opp.sell_dex.display_name().to_string(),
@@ -67,20 +71,20 @@ impl HistoryRecorder {
 
         match serde_json::to_string(&record) {
             Ok(json) => {
-                 let open_result = OpenOptions::new()
+                let open_result = OpenOptions::new()
                     .create(true)
                     .append(true)
                     .open(&self.file_path);
-                
+
                 match open_result {
                     Ok(mut file) => {
-                         if let Err(e) = writeln!(file, "{}", json) {
+                        if let Err(e) = writeln!(file, "{}", json) {
                             eprintln!("Failed to write to history file: {}", e);
                         }
-                    },
+                    }
                     Err(e) => eprintln!("Failed to open history file {}: {}", self.file_path, e),
                 }
-            },
+            }
             Err(e) => eprintln!("Failed to serialize trade record: {}", e),
         }
     }
@@ -105,17 +109,17 @@ impl HistoryAnalyzer {
     pub fn analyze(file_path: &str) -> Result<AnalysisReport, std::io::Error> {
         let path = Path::new(file_path);
         if !path.exists() {
-             return Ok(AnalysisReport {
+            return Ok(AnalysisReport {
                 total_trades: 0,
                 successful_trades: 0,
                 success_rate: 0.0,
                 total_profit_usd: "0.00".to_string(),
                 avg_profit_usd: "0.00".to_string(),
-                best_pair: None, 
+                best_pair: None,
                 best_route: None,
                 worst_route: None,
                 total_volume_usd: "0.00".to_string(),
-             });
+            });
         }
 
         let file = fs::File::open(path)?;
@@ -133,17 +137,17 @@ impl HistoryAnalyzer {
 
         let total_trades = trades.len();
         if total_trades == 0 {
-             return Ok(AnalysisReport {
+            return Ok(AnalysisReport {
                 total_trades: 0,
                 successful_trades: 0,
                 success_rate: 0.0,
                 total_profit_usd: "0.00".to_string(),
                 avg_profit_usd: "0.00".to_string(),
-                best_pair: None, 
+                best_pair: None,
                 best_route: None,
                 worst_route: None,
                 total_volume_usd: "0.00".to_string(),
-             });
+            });
         }
 
         let successful_trades = trades.iter().filter(|t| t.success).count();
@@ -155,15 +159,17 @@ impl HistoryAnalyzer {
 
         let mut total_profit = Decimal::ZERO;
         let mut total_volume = Decimal::ZERO;
-        let mut pair_profit: std::collections::HashMap<String, Decimal> = std::collections::HashMap::new();
-        let mut route_profit: std::collections::HashMap<String, Decimal> = std::collections::HashMap::new();
+        let mut pair_profit: std::collections::HashMap<String, Decimal> =
+            std::collections::HashMap::new();
+        let mut route_profit: std::collections::HashMap<String, Decimal> =
+            std::collections::HashMap::new();
 
         use std::str::FromStr;
         for trade in &trades {
             if let Ok(profit) = Decimal::from_str(&trade.profit_usd) {
                 total_profit += profit;
                 *pair_profit.entry(trade.pair.clone()).or_default() += profit;
-                
+
                 let route = format!("{}->{}", trade.buy_dex, trade.sell_dex);
                 *route_profit.entry(route).or_default() += profit;
             }
@@ -178,15 +184,18 @@ impl HistoryAnalyzer {
             Decimal::ZERO
         };
 
-        let best_pair = pair_profit.iter()
+        let best_pair = pair_profit
+            .iter()
             .max_by(|a, b| a.1.cmp(b.1))
             .map(|(k, _)| k.clone());
 
-        let best_route = route_profit.iter()
+        let best_route = route_profit
+            .iter()
             .max_by(|a, b| a.1.cmp(b.1))
             .map(|(k, _)| k.clone());
 
-        let worst_route = route_profit.iter()
+        let worst_route = route_profit
+            .iter()
             .min_by(|a, b| a.1.cmp(b.1))
             .map(|(k, _)| k.clone());
 
@@ -203,4 +212,3 @@ impl HistoryAnalyzer {
         })
     }
 }
-

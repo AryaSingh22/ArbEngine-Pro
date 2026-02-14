@@ -1,15 +1,18 @@
 use axum::{
-    extract::{ws::{Message, WebSocket, WebSocketUpgrade}, State},
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        State,
+    },
     response::IntoResponse,
 };
 use futures::{sink::SinkExt, stream::StreamExt};
 use serde::Serialize;
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
-use solana_arb_core::{ArbitrageOpportunity, PriceData};
 use crate::AppState;
+use solana_arb_core::{ArbitrageOpportunity, PriceData};
 
 /// WebSocket message sent to clients
 #[derive(Debug, Clone, Serialize)]
@@ -58,8 +61,8 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
         while let Some(Ok(msg)) = receiver.next().await {
             match msg {
                 Message::Close(_) => break,
-                Message::Ping(_) => {}, // Automatically handled by axum/tungstenite mostly
-                _ => {},
+                Message::Ping(_) => {} // Automatically handled by axum/tungstenite mostly
+                _ => {}
             }
         }
     });
@@ -69,6 +72,6 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
         _ = (&mut send_task) => recv_task.abort(),
         _ = (&mut recv_task) => send_task.abort(),
     };
-    
+
     info!("WebSocket client disconnected");
 }

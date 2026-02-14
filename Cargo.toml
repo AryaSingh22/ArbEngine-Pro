@@ -4,6 +4,9 @@ members = [
     # "crates/collector", - DISABLED to fix build conflict
     "crates/api",
     "crates/bot",
+    "crates/flash-loans",
+    "crates/dex-plugins",
+    "crates/strategies",
 ]
 resolver = "2"
 
@@ -36,6 +39,9 @@ async-trait = "0.1"
 
 # Database - default-features=false and NO MACROS to avoid pulling mysql/sqlite
 # sqlx = { version = "0.7", features = ["postgres", "runtime-tokio-native-tls", "chrono", "rust_decimal"], default-features = false }
+tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-uuid-1"] }
+deadpool-postgres = "0.12"
+postgres-types = { version = "0.2", features = ["derive"] }
 
 # HTTP client
 reqwest = { version = "0.11", features = ["json", "native-tls-vendored", "blocking"], default-features = false }

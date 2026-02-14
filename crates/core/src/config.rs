@@ -41,8 +41,9 @@ impl Config {
     /// Load configuration from environment variables
     pub fn from_env() -> Result<Self, env::VarError> {
         Ok(Self {
-            database_url: env::var("DATABASE_URL")
-                .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/solana_arb".to_string()),
+            database_url: env::var("DATABASE_URL").unwrap_or_else(|_| {
+                "postgres://postgres:postgres@localhost:5432/solana_arb".to_string()
+            }),
             redis_url: env::var("REDIS_URL")
                 .unwrap_or_else(|_| "redis://localhost:6379".to_string()),
             solana_rpc_url: env::var("SOLANA_RPC_URL")
@@ -59,8 +60,7 @@ impl Config {
                 .unwrap_or_else(|_| "8080".to_string())
                 .parse()
                 .unwrap_or(8080),
-            log_level: env::var("LOG_LEVEL")
-                .unwrap_or_else(|_| "info".to_string()),
+            log_level: env::var("LOG_LEVEL").unwrap_or_else(|_| "info".to_string()),
             priority_fee_micro_lamports: env::var("PRIORITY_FEE")
                 .unwrap_or_else(|_| "50000".to_string())
                 .parse()
@@ -69,8 +69,7 @@ impl Config {
                 .unwrap_or_else(|_| "200000".to_string())
                 .parse()
                 .unwrap_or(200000),
-            rpc_commitment: env::var("RPC_COMMITMENT")
-                .unwrap_or_else(|_| "confirmed".to_string()),
+            rpc_commitment: env::var("RPC_COMMITMENT").unwrap_or_else(|_| "confirmed".to_string()),
             slippage_bps: env::var("SLIPPAGE_BPS")
                 .unwrap_or_else(|_| "50".to_string())
                 .parse()

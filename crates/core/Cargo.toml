@@ -16,6 +16,8 @@ tracing = { workspace = true }
 futures-util = "0.3"
 uuid = { version = "1", features = ["v4", "serde"] }
 solana-sdk = { workspace = true }
+solana-rpc-client = { workspace = true }
+rand = "0.8"
 
 # Optional - for HTTP-based DEX providers
 reqwest = { workspace = true, optional = true }
@@ -23,17 +25,23 @@ reqwest = { workspace = true, optional = true }
 # Optional - for WebSocket connections  
 tokio-tungstenite = { workspace = true, optional = true }
 
-# Optional - for database storage - DISABLED TO FIX BUILD CONFLICT
+# Optional - for database storage
 # sqlx = { workspace = true, optional = true }
+tokio-postgres = { workspace = true, optional = true }
+deadpool-postgres = { workspace = true, optional = true }
+postgres-types = { workspace = true, optional = true }
 
 # Optional - for Redis pub/sub
 redis = { workspace = true, optional = true }
+simd-json = "0.17.0"
+memmap2 = "0.9.9"
+bincode = "1.3"
 
 [features]
 default = ["http"]
 http = ["reqwest"]
 ws = ["tokio-tungstenite"]
-# db = ["sqlx"]
+db = ["tokio-postgres", "deadpool-postgres", "postgres-types"]
 cache = ["redis"]
 full = ["http", "ws", "cache"]
 

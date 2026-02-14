@@ -1,11 +1,11 @@
-use tracing::{info, warn};
+use crate::types::{ArbitrageOpportunity, DexType, TokenPair};
 use chrono::Utc;
+use rand::Rng;
 use rust_decimal::Decimal;
-use crate::types::{TokenPair, DexType, ArbitrageOpportunity};
-use uuid::Uuid;
 use std::thread;
 use std::time::Duration;
-use rand::Rng;
+use tracing::{info, warn};
+use uuid::Uuid;
 
 #[test]
 #[ignore] // Run manually to generate logs
@@ -31,7 +31,7 @@ fn generate_comprehensive_logs() {
     println!("🚀 Solana Arbitrage Bot starting...");
     println!("   Min profit threshold: 0.5%");
     println!("   Mode: DRY_RUN (Simulation)");
-    
+
     let mut rng = rand::thread_rng();
     let start_time = Utc::now();
 
@@ -40,7 +40,10 @@ fn generate_comprehensive_logs() {
         let timestamp = current_time.format("%Y-%m-%dT%H:%M:%S%.3fZ");
 
         // 1. Scan Log
-        println!("[{} INFO] 🔎 Scanning markets for arbitrage opportunities...", timestamp);
+        println!(
+            "[{} INFO] 🔎 Scanning markets for arbitrage opportunities...",
+            timestamp
+        );
 
         // Random chance to find opportunity (30%)
         if rng.gen_bool(0.3) {
@@ -51,10 +54,14 @@ fn generate_comprehensive_logs() {
                 sell_dex = &dexs[rng.gen_range(0..dexs.len())];
             }
 
-            let buy_price = Decimal::from_f64_retain(rng.gen_range(10.0..200.0)).unwrap().round_dp(2);
-            let profit_pct = Decimal::from_f64_retain(rng.gen_range(0.5..2.5)).unwrap().round_dp(2);
+            let buy_price = Decimal::from_f64_retain(rng.gen_range(10.0..200.0))
+                .unwrap()
+                .round_dp(2);
+            let profit_pct = Decimal::from_f64_retain(rng.gen_range(0.5..2.5))
+                .unwrap()
+                .round_dp(2);
             let sell_price = buy_price * (Decimal::ONE + profit_pct / Decimal::from(100));
-            
+
             let amount = Decimal::from(rng.gen_range(100..1000));
             let est_profit = amount * profit_pct / Decimal::from(100);
 
@@ -64,28 +71,34 @@ fn generate_comprehensive_logs() {
             // 2. Execution Log
             let exec_time = current_time + chrono::Duration::milliseconds(150);
             let exec_ts = exec_time.format("%Y-%m-%dT%H:%M:%S%.3fZ");
-            
+
             println!("[{} INFO] 🔵 [DRY RUN] Would execute: Buy {} on {:?}, Sell on {:?} | Size: ${} | Est. Profit: ${}",
                 exec_ts, pair, buy_dex, sell_dex, amount, est_profit.round_dp(2));
 
             // 3. Success Log
             let done_time = exec_time + chrono::Duration::milliseconds(800);
             let done_ts = done_time.format("%Y-%m-%dT%H:%M:%S%.3fZ");
-            
-            println!("[{} INFO] ✅ [DRY RUN] Trade simulated successfully. Recorded in Risk Manager.", done_ts);
+
+            println!(
+                "[{} INFO] ✅ [DRY RUN] Trade simulated successfully. Recorded in Risk Manager.",
+                done_ts
+            );
         } else {
             // No opportunity
-             let check_time = current_time + chrono::Duration::milliseconds(50);
-             let check_ts = check_time.format("%Y-%m-%dT%H:%M:%S%.3fZ");
-            println!("[{} INFO]    No profitable opportunities found above threshold.", check_ts);
+            let check_time = current_time + chrono::Duration::milliseconds(50);
+            let check_ts = check_time.format("%Y-%m-%dT%H:%M:%S%.3fZ");
+            println!(
+                "[{} INFO]    No profitable opportunities found above threshold.",
+                check_ts
+            );
         }
-        
+
         // Heartbeat occasionally
         if i % 10 == 0 {
-             let hb_time = current_time + chrono::Duration::milliseconds(100);
-             let hb_ts = hb_time.format("%Y-%m-%dT%H:%M:%S%.3fZ");
-             let pnl = Decimal::from(i) * Decimal::new(5, 1);
-             println!("[{} INFO] 📊 Status - Exposure: $0.00, Simulated P&L: ${}, Trades: {}, Paused: false", 
+            let hb_time = current_time + chrono::Duration::milliseconds(100);
+            let hb_ts = hb_time.format("%Y-%m-%dT%H:%M:%S%.3fZ");
+            let pnl = Decimal::from(i) * Decimal::new(5, 1);
+            println!("[{} INFO] 📊 Status - Exposure: $0.00, Simulated P&L: ${}, Trades: {}, Paused: false", 
                 hb_ts, pnl, i / 3);
         }
     }
