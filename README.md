@@ -94,6 +94,11 @@ The system has passed a comprehensive test suite covering all critical modules:
 
 **Total Tests Passed: 25** ✅
 
+## 📚 Documentation
+- **[Deployment Guide](docs/DEPLOYMENT.md)**: Detailed VPS and Docker setup instructions.
+- **[Internal Architecture](docs/INTERNALS.md)**: Deep dive into the pathfinding and risk engine.
+- **[Easy Tutorial](docs/EASY_TUTORIAL.md)**: Beginner-friendly guide for running simulated trades.
+
 ## 📁 Project Structure
 
 ```
