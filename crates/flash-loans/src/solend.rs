@@ -1,6 +1,5 @@
 use super::FlashLoanProvider;
 use anyhow::{anyhow, Result};
-use async_trait::async_trait;
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use solana_sdk::{
@@ -45,7 +44,6 @@ impl SolendFlashLoan {
     }
 }
 
-#[async_trait]
 impl FlashLoanProvider for SolendFlashLoan {
     fn name(&self) -> &'static str {
         Self::PROTOCOL_NAME
@@ -110,7 +108,7 @@ impl FlashLoanProvider for SolendFlashLoan {
         })
     }
 
-    async fn get_quote(
+    fn get_quote(
         &self,
         _token_mint: Pubkey,
         amount: Decimal,

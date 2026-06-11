@@ -31,5 +31,5 @@ solana-sdk = { workspace = true }
 rand = "0.8"
 prometheus = "0.13"
 axum = { version = "0.7", features = ["macros"] }
-spl-token = { version = "4.0", features = ["no-entrypoint"] }
-spl-associated-token-account = { version = "2.0", features = ["no-entrypoint"] }
+spl-token = { version = "6", features = ["no-entrypoint"] }
+spl-associated-token-account = { version = "5", features = ["no-entrypoint"] }

@@ -3,7 +3,7 @@
 //! Raydium is one of the largest AMM DEXs on Solana.
 //! This provider fetches pool data and calculates prices.
 
-use async_trait::async_trait;
+
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use tokio::sync::mpsc;
@@ -57,97 +57,102 @@ impl Default for RaydiumProvider {
     }
 }
 
-#[async_trait]
 impl DexProvider for RaydiumProvider {
     fn dex_type(&self) -> DexType {
         DexType::Raydium
     }
 
-    async fn get_price(&self, pair: &TokenPair) -> ArbitrageResult<PriceData> {
-        let pairs: Vec<RaydiumPair> = self.client.get(RAYDIUM_API).send().await?.json().await?;
+    fn get_price<'a>(&'a self, pair: &'a TokenPair) -> crate::dex::BoxFuture<'a, ArbitrageResult<PriceData>> {
+        Box::pin(async move {
+            let pairs: Vec<RaydiumPair> = self.client.get(RAYDIUM_API).send().await?.json().await?;
 
-        let target_name = format!("{}-{}", pair.base, pair.quote);
-        let reverse_name = format!("{}-{}", pair.quote, pair.base);
+            let target_name = format!("{}-{}", pair.base, pair.quote);
+            let reverse_name = format!("{}-{}", pair.quote, pair.base);
 
-        let raydium_pair = pairs
-            .iter()
-            .find(|p| p.name == target_name || p.name == reverse_name)
-            .ok_or_else(|| {
-                ArbitrageError::PriceFetch(format!("Pair {} not found on Raydium", pair))
-            })?;
+            let raydium_pair = pairs
+                .iter()
+                .find(|p| p.name == target_name || p.name == reverse_name)
+                .ok_or_else(|| {
+                    ArbitrageError::PriceFetch(format!("Pair {} not found on Raydium", pair))
+                })?;
 
-        let mut price = Decimal::try_from(raydium_pair.price)
-            .map_err(|e| ArbitrageError::PriceFetch(format!("Invalid price: {}", e)))?;
+            let mut price = Decimal::try_from(raydium_pair.price)
+                .map_err(|e| ArbitrageError::PriceFetch(format!("Invalid price: {}", e)))?;
 
-        // If we found the reverse pair, invert the price
-        if raydium_pair.name == reverse_name {
-            price = Decimal::ONE / price;
-        }
+            // If we found the reverse pair, invert the price
+            if raydium_pair.name == reverse_name {
+                price = Decimal::ONE / price;
+            }
 
-        // Raydium AMM typically has ~0.25% spread
-        let spread = price * Decimal::new(25, 5); // 0.025% each side
-        let bid = price - spread;
-        let ask = price + spread;
+            // Raydium AMM typically has ~0.25% spread
+            let spread = price * Decimal::new(25, 5); // 0.025% each side
+            let bid = price - spread;
+            let ask = price + spread;
 
-        let mut price_data = PriceData::new(DexType::Raydium, pair.clone(), bid, ask);
-        price_data.volume_24h =
-            Some(Decimal::try_from(raydium_pair.volume_24h).unwrap_or_default());
-        price_data.liquidity = Some(Decimal::try_from(raydium_pair.liquidity).unwrap_or_default());
+            let mut price_data = PriceData::new(DexType::Raydium, pair.clone(), bid, ask);
+            price_data.volume_24h =
+                Some(Decimal::try_from(raydium_pair.volume_24h).unwrap_or_default());
+            price_data.liquidity = Some(Decimal::try_from(raydium_pair.liquidity).unwrap_or_default());
 
-        Ok(price_data)
+            Ok(price_data)
+        })
     }
 
-    async fn subscribe(&self, pairs: Vec<TokenPair>) -> ArbitrageResult<PriceStream> {
-        let (tx, rx) = mpsc::channel(100);
-        let client = self.client.clone();
+    fn subscribe<'a>(&'a self, pairs: Vec<TokenPair>) -> crate::dex::BoxFuture<'a, ArbitrageResult<PriceStream>> {
+        Box::pin(async move {
+            let (tx, rx) = mpsc::channel(100);
+            let client = self.client.clone();
 
-        tokio::spawn(async move {
-            loop {
-                if let Ok(response) = client.get(RAYDIUM_API).send().await {
-                    if let Ok(all_pairs) = response.json::<Vec<RaydiumPair>>().await {
-                        for pair in &pairs {
-                            let target_name = format!("{}-{}", pair.base, pair.quote);
-                            let reverse_name = format!("{}-{}", pair.quote, pair.base);
+            tokio::spawn(async move {
+                loop {
+                    if let Ok(response) = client.get(RAYDIUM_API).send().await {
+                        if let Ok(all_pairs) = response.json::<Vec<RaydiumPair>>().await {
+                            for pair in &pairs {
+                                let target_name = format!("{}-{}", pair.base, pair.quote);
+                                let reverse_name = format!("{}-{}", pair.quote, pair.base);
 
-                            if let Some(raydium_pair) = all_pairs
-                                .iter()
-                                .find(|p| p.name == target_name || p.name == reverse_name)
-                            {
-                                if let Ok(mut price) = Decimal::try_from(raydium_pair.price) {
-                                    if raydium_pair.name == reverse_name {
-                                        price = Decimal::ONE / price;
-                                    }
+                                if let Some(raydium_pair) = all_pairs
+                                    .iter()
+                                    .find(|p| p.name == target_name || p.name == reverse_name)
+                                {
+                                    if let Ok(mut price) = Decimal::try_from(raydium_pair.price) {
+                                        if raydium_pair.name == reverse_name {
+                                            price = Decimal::ONE / price;
+                                        }
 
-                                    let spread = price * Decimal::new(25, 5);
-                                    let bid = price - spread;
-                                    let ask = price + spread;
+                                        let spread = price * Decimal::new(25, 5);
+                                        let bid = price - spread;
+                                        let ask = price + spread;
 
-                                    let mut price_data =
-                                        PriceData::new(DexType::Raydium, pair.clone(), bid, ask);
-                                    price_data.volume_24h =
-                                        Decimal::try_from(raydium_pair.volume_24h).ok();
-                                    price_data.liquidity =
-                                        Decimal::try_from(raydium_pair.liquidity).ok();
+                                        let mut price_data =
+                                            PriceData::new(DexType::Raydium, pair.clone(), bid, ask);
+                                        price_data.volume_24h =
+                                            Decimal::try_from(raydium_pair.volume_24h).ok();
+                                        price_data.liquidity =
+                                            Decimal::try_from(raydium_pair.liquidity).ok();
 
-                                    if tx.send(price_data).await.is_err() {
-                                        return;
+                                        if tx.send(price_data).await.is_err() {
+                                            return;
+                                        }
                                     }
                                 }
                             }
                         }
                     }
+
+                    // Poll every 500ms
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                 }
+            });
 
-                // Poll every 500ms
-                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-            }
-        });
-
-        Ok(rx)
+            Ok(rx)
+        })
     }
 
-    async fn health_check(&self) -> ArbitrageResult<bool> {
-        let response = self.client.get(RAYDIUM_API).send().await?;
-        Ok(response.status().is_success())
+    fn health_check<'a>(&'a self) -> crate::dex::BoxFuture<'a, ArbitrageResult<bool>> {
+        Box::pin(async move {
+            let response = self.client.get(RAYDIUM_API).send().await?;
+            Ok(response.status().is_success())
+        })
     }
 }

@@ -170,7 +170,7 @@ mod arbitrage_tests {
         let mut detector = create_detector_with_low_threshold();
 
         let mut raydium_price = make_price(DexType::Raydium, "SOL", "USDC", 99.9, 100.0);
-        raydium_price.timestamp = raydium_price.timestamp - Duration::seconds(10);
+        raydium_price.timestamp -= Duration::seconds(10);
         detector.update_price(raydium_price);
 
         detector.update_price(make_price(DexType::Orca, "SOL", "USDC", 102.0, 102.1));

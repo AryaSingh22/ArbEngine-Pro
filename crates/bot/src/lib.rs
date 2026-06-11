@@ -38,7 +38,7 @@ use solana_arb_core::{
     alt::AltManager,
     arbitrage::ArbitrageDetector,
     config::Config,
-    dex::{jupiter::JupiterProvider, orca::OrcaProvider, raydium::RaydiumProvider, DexManager},
+    dex::{jupiter::JupiterProvider, DexManager},
     history::HistoryRecorder,
     jito::JitoClient,
     pathfinding::PathFinder,
@@ -131,6 +131,9 @@ struct BotState {
     jupiter_rate_limiter: Arc<RateLimiter>,
     /// Dynamic configuration manager.
     config_manager: Arc<ConfigManager>,
+    /// Latest on-chain streamed prices, keyed by "dex|pair". Written by the
+    /// account-stream consumer task, merged into detection each tick.
+    streaming_cache: Arc<RwLock<std::collections::HashMap<String, solana_arb_core::PriceData>>>,
 }
 
 impl BotState {
@@ -168,11 +171,15 @@ impl BotState {
         dex_manager.add_provider(Arc::new(JupiterProvider::new()));
         info!("🔌 Registered DEX provider: Jupiter");
 
-        dex_manager.add_provider(Arc::new(RaydiumProvider::new()));
-        info!("🔌 Registered DEX provider: Raydium");
-
-        dex_manager.add_provider(Arc::new(OrcaProvider::new()));
-        info!("🔌 Registered DEX provider: Orca");
+        // The Raydium/Orca REST providers were removed from detection: those
+        // endpoints serve cached aggregate stats that are minutes stale, so
+        // spreads computed against them are phantom opportunities. On-chain
+        // streaming providers replace them (see core::streaming).
+        if std::env::var("ENABLE_LEGACY_REST_PROVIDERS").map(|v| v == "true" || v == "1").unwrap_or(false) {
+            dex_manager.add_provider(Arc::new(solana_arb_core::dex::raydium::RaydiumProvider::new()));
+            dex_manager.add_provider(Arc::new(solana_arb_core::dex::orca::OrcaProvider::new()));
+            warn!("⚠️ Legacy Raydium/Orca REST providers enabled — their data is STALE and unsuitable for live trading");
+        }
 
         dex_manager.add_provider(Arc::new(LifinityProvider::new()));
         info!("🔌 Registered DEX provider: Lifinity");
@@ -220,7 +227,7 @@ impl BotState {
                 .parse()
                 .unwrap_or(100000);
             info!(
-                "🛡️ Jito MEV Protection enabled (Engine: {}, Tip: {} lamports)",
+                "🛡️ Jito MEV Protection enabled (Engine: {}, fallback tip: {} lamports, dynamic tips from tip floor unless JITO_DYNAMIC_TIPS=false)",
                 engine_url, tip
             );
             Some(JitoClient::new(&engine_url, tip))
@@ -250,6 +257,12 @@ impl BotState {
             slippage_bps: config.slippage_bps,
             max_retries: config.max_retries,
             rpc_commitment: config.rpc_commitment.clone(),
+            nonce_account_pubkeys: config.nonce_account_pubkeys.clone(),
+            rpc_urls: config.rpc_urls.clone(),
+            rpc_timeout_ms: config.rpc_timeout_ms,
+            jito_fallback_to_rpc: config.jito_fallback_to_rpc,
+            jupiter_api_url: config.jupiter_swap_api_url.clone(),
+            jupiter_api_key: config.jupiter_api_key.clone(),
         });
         
         // Initialize Rate Limiters
@@ -290,6 +303,7 @@ impl BotState {
             rpc_rate_limiter,
             jupiter_rate_limiter,
             config_manager,
+            streaming_cache: Arc::new(RwLock::new(std::collections::HashMap::new())),
         }
     }
     
@@ -315,7 +329,7 @@ impl BotState {
     async fn check_flash_loan(&self, opp: &solana_arb_core::ArbitrageOpportunity, size: Decimal) -> Option<solana_arb_flash_loans::FlashLoanQuote> {
         if let Some(mint) = resolve_mint(&opp.pair.base) {
             // Assume borrowing base asset
-            match self.flash_loan_provider.get_quote(mint, size).await {
+            match self.flash_loan_provider.get_quote(mint, size) {
                 Ok(quote) => {
                     // Simplified: fee is in base token.
                     let fee_pct = (quote.fee / size) * Decimal::from(100);
@@ -459,8 +473,47 @@ async fn run_trading_loop(state: Arc<RwLock<BotState>>, pairs: Vec<TokenPair>) {
         });
     }
 
+    // Spawn the on-chain account streamer when pools are configured.
+    // Streamed prices arrive event-driven (when pool vaults change) and
+    // override same-aged HTTP prices during detection.
+    {
+        let pools_raw = std::env::var("STREAMING_POOLS").unwrap_or_default();
+        let pools =
+            solana_arb_core::streaming::account_stream::PoolSubscription::parse_list(&pools_raw);
+        if !pools.is_empty() {
+            let ws_url = match std::env::var("SOLANA_WS_URL") {
+                Ok(url) if !url.is_empty() => url,
+                _ => state.read().await.rpc_url.clone(),
+            };
+            info!(
+                "📡 On-chain account streaming enabled: {} pools via {}",
+                pools.len(),
+                ws_url
+            );
+            let (price_tx, mut price_rx) = tokio::sync::mpsc::channel(1024);
+            let streamer = solana_arb_core::streaming::account_stream::AccountStreamer::new(
+                &ws_url, pools,
+            );
+            tokio::spawn(streamer.run(price_tx));
+
+            let cache = state.read().await.streaming_cache.clone();
+            tokio::spawn(async move {
+                while let Some(price) = price_rx.recv().await {
+                    let key = format!("{}|{}", price.dex.display_name(), price.pair.symbol());
+                    cache.write().await.insert(key, price);
+                }
+            });
+        }
+    }
+
     let mut tick = 0u64;
     let mut last_balance_check = Instant::now();
+    let poll_interval = Duration::from_millis(
+        std::env::var("POLL_INTERVAL_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(500),
+    );
 
     loop {
         // 1. Check Kill Switch
@@ -552,7 +605,7 @@ async fn run_trading_loop(state: Arc<RwLock<BotState>>, pairs: Vec<TokenPair>) {
                 
                 // Execute Strategies
                 for strategy in &state.strategies {
-                    if let Ok(strategy_opps) = strategy.analyze(&recent_prices).await {
+                    if let Ok(strategy_opps) = strategy.analyze(&recent_prices) {
                          opps.extend(strategy_opps);
                     }
                 }
@@ -590,6 +643,8 @@ async fn run_trading_loop(state: Arc<RwLock<BotState>>, pairs: Vec<TokenPair>) {
 
                 if should_execute {
                     execute_trade(&state, opp).await;
+                    let state = state.read().await;
+                    state.metrics.tick_to_trade.observe(start.elapsed().as_secs_f64());
                 }
             }
 
@@ -620,9 +675,9 @@ async fn run_trading_loop(state: Arc<RwLock<BotState>>, pairs: Vec<TokenPair>) {
 
                              // Update health
                              {
+                                 let sol_price = fetch_sol_price_usd().await.unwrap_or(150.0);
                                  let mut h = system_health.write().await;
-                                 // Approximation: 1 SOL = $150 (should fetch real price)
-                                 h.balance_usd = balance_sol * 150.0; 
+                                 h.balance_usd = balance_sol * sol_price;
                              }
 
                              if balance_sol < 0.1 {
@@ -671,7 +726,7 @@ async fn run_trading_loop(state: Arc<RwLock<BotState>>, pairs: Vec<TokenPair>) {
             }
         }
 
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        tokio::time::sleep(poll_interval).await;
     }
 }
 
@@ -683,7 +738,7 @@ async fn collect_prices(
     state: &Arc<RwLock<BotState>>,
     pairs: &[TokenPair],
 ) -> Result<Vec<solana_arb_core::PriceData>, Box<dyn std::error::Error>> {
-    let prices = {
+    let mut prices = {
         let state = state.read().await;
 
         // Use parallel fetcher for all pairs at once!
@@ -694,6 +749,37 @@ async fn collect_prices(
         );
         all_prices
     };
+
+    // Merge fresh on-chain streamed prices. They are event-driven (emitted
+    // when pool vaults actually change), so they take precedence over HTTP
+    // prices for the same (dex, pair).
+    {
+        let state = state.read().await;
+        let max_age = chrono::Duration::seconds(state.max_price_age_seconds);
+        let now = Utc::now();
+        let cache = state.streaming_cache.read().await;
+        for streamed in cache.values() {
+            if now - streamed.timestamp > max_age {
+                continue;
+            }
+            match prices
+                .iter_mut()
+                .find(|p| p.dex == streamed.dex && p.pair == streamed.pair)
+            {
+                Some(existing) => *existing = streamed.clone(),
+                None => prices.push(streamed.clone()),
+            }
+        }
+    }
+
+    // Sanity guard: drop quotes deviating wildly from the per-pair median so
+    // one bad feed can't fabricate phantom spreads against healthy feeds.
+    let max_deviation_pct: Decimal = std::env::var("PRICE_SANITY_MAX_DEVIATION_PCT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or_else(|| Decimal::from(20));
+    let prices =
+        solana_arb_core::pricing::sanity::filter_price_outliers(prices, max_deviation_pct);
 
     info!("📈 Received price data from DEX ({} prices)", prices.len());
 
@@ -718,7 +804,7 @@ async fn collect_prices(
         // Update strategies
         for strategy in &state.strategies {
             for price in &prices {
-                if let Err(e) = strategy.update_state(price).await {
+                if let Err(e) = strategy.update_state(price) {
                     warn!("Strategy {} update failed: {}", strategy.name(), e);
                 }
             }
@@ -728,6 +814,31 @@ async fn collect_prices(
     validate_dex_coverage(&prices, pairs);
 
     Ok(prices)
+}
+
+/// Fetch the live SOL/USD price from the Jupiter Price API V3.
+/// Returns None on any failure; callers fall back to an approximation.
+async fn fetch_sol_price_usd() -> Option<f64> {
+    let key = std::env::var("JUPITER_API_KEY").ok().filter(|k| !k.is_empty());
+    let base = std::env::var("JUPITER_PRICE_API_URL").unwrap_or_else(|_| {
+        if key.is_some() {
+            "https://api.jup.ag/price/v3".to_string()
+        } else {
+            "https://lite-api.jup.ag/price/v3".to_string()
+        }
+    });
+    let url = format!("{}?ids={}", base, SOL_MINT);
+    let client = reqwest::Client::new();
+    let req = match &key {
+        Some(k) => client.get(&url).header("x-api-key", k),
+        None => client.get(&url),
+    };
+    let value: serde_json::Value = req.send().await.ok()?.json().await.ok()?;
+    value
+        .get(SOL_MINT)?
+        .get("usdPrice")?
+        .as_f64()
+        .filter(|p| *p > 0.0)
 }
 
 fn validate_dex_coverage(prices: &[solana_arb_core::PriceData], pairs: &[TokenPair]) {
@@ -750,8 +861,10 @@ fn validate_dex_coverage(prices: &[solana_arb_core::PriceData], pairs: &[TokenPa
 
         if !missing.is_empty() {
             let missing_labels: Vec<_> = missing.iter().map(|dex| dex.display_name()).collect();
-            warn!(
-                "⚠️ Missing DEX coverage for {}: {}",
+            // Debug level: full coverage is expected only once streaming pools
+            // are configured for every DEX (legacy REST providers were removed).
+            debug!(
+                "Missing DEX coverage for {}: {}",
                 pair,
                 missing_labels.join(", ")
             );
@@ -869,6 +982,30 @@ async fn execute_trade(state: &Arc<RwLock<BotState>>, opp: &solana_arb_core::Arb
                 if trade_result.success {
                     let tx_signature = trade_result.signature.as_deref().unwrap_or("unknown");
                     info!("✅ Trade submitted! Signature: {}", tx_signature);
+
+                    // Land-rate accounting: for Jito submissions the signature
+                    // is the bundle id; poll its status in the background so
+                    // landed/submitted is measurable without blocking the loop.
+                    let state_read = state.read().await;
+                    if let (Some(jito), Some(bundle_id)) =
+                        (state_read.jito_client.clone(), trade_result.signature.clone())
+                    {
+                        state_read.metrics.jito_bundles_submitted.inc();
+                        let metrics = state_read.metrics.clone();
+                        tokio::spawn(async move {
+                            for _ in 0..15 {
+                                tokio::time::sleep(Duration::from_secs(2)).await;
+                                if let Ok(Some(status)) = jito.get_bundle_status(&bundle_id).await {
+                                    if status.confirmation_status == "confirmed"
+                                        || status.confirmation_status == "finalized"
+                                    {
+                                        metrics.jito_bundles_landed.inc();
+                                        return;
+                                    }
+                                }
+                            }
+                        });
+                    }
                 } else {
                     let error_msg = trade_result.error.as_deref().unwrap_or("Unknown error");
                     warn!("❌ Trade execution returned failure: {}", error_msg);

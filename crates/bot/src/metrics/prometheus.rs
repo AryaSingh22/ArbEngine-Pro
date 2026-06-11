@@ -9,6 +9,8 @@ pub struct MetricsCollector {
     pub trades_attempted: IntCounter,
     pub trades_successful: IntCounter,
     pub trades_failed: IntCounter,
+    pub jito_bundles_submitted: IntCounter,
+    pub jito_bundles_landed: IntCounter,
 
     // Gauges
     pub current_balance: Gauge,
@@ -20,6 +22,9 @@ pub struct MetricsCollector {
     pub trade_execution_time: Histogram,
     pub price_fetch_latency: Histogram,
     pub slippage_distribution: Histogram,
+    /// Latency from the start of a price tick to execution completing —
+    /// the bot's end-to-end competitiveness scoreboard.
+    pub tick_to_trade: Histogram,
 }
 
 impl MetricsCollector {
@@ -48,6 +53,18 @@ impl MetricsCollector {
         let trades_failed =
             IntCounter::new("arb_trades_failed_total", "Total number of failed trades")?;
         registry.register(Box::new(trades_failed.clone()))?;
+
+        let jito_bundles_submitted = IntCounter::new(
+            "arb_jito_bundles_submitted_total",
+            "Total Jito bundles accepted by the block engine",
+        )?;
+        registry.register(Box::new(jito_bundles_submitted.clone()))?;
+
+        let jito_bundles_landed = IntCounter::new(
+            "arb_jito_bundles_landed_total",
+            "Total Jito bundles confirmed on-chain (land rate = landed / submitted)",
+        )?;
+        registry.register(Box::new(jito_bundles_landed.clone()))?;
 
         // Initialize gauges
         let current_balance =
@@ -100,12 +117,23 @@ impl MetricsCollector {
         )?;
         registry.register(Box::new(slippage_distribution.clone()))?;
 
+        let tick_to_trade = Histogram::with_opts(
+            HistogramOpts::new(
+                "arb_tick_to_trade_seconds",
+                "Latency from price tick start to trade execution complete",
+            )
+            .buckets(vec![0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0]),
+        )?;
+        registry.register(Box::new(tick_to_trade.clone()))?;
+
         Ok(Self {
             registry,
             opportunities_detected,
             trades_attempted,
             trades_successful,
             trades_failed,
+            jito_bundles_submitted,
+            jito_bundles_landed,
             current_balance,
             active_positions,
             circuit_breaker_state,
@@ -113,6 +141,7 @@ impl MetricsCollector {
             trade_execution_time,
             price_fetch_latency,
             slippage_distribution,
+            tick_to_trade,
         })
     }
 

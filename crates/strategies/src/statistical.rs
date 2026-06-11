@@ -1,5 +1,4 @@
 use crate::Strategy;
-use async_trait::async_trait;
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use solana_arb_core::{
@@ -7,7 +6,7 @@ use solana_arb_core::{
     ArbitrageResult,
 };
 use std::collections::VecDeque;
-use tokio::sync::RwLock;
+use std::sync::RwLock;
 
 pub struct StatisticalArbitrage {
     // Sliding window of price ratios for pairs
@@ -60,17 +59,16 @@ impl StatisticalArbitrage {
     }
 }
 
-#[async_trait]
 impl Strategy for StatisticalArbitrage {
     fn name(&self) -> &'static str {
         "Statistical Arbitrage (Mean Reversion)"
     }
 
-    async fn update_state(&self, price: &PriceData) -> ArbitrageResult<()> {
-        let mut history = self.history.write().await;
+    fn update_state(&self, price: &PriceData) -> ArbitrageResult<()> {
+        let mut history = self.history.write().unwrap();
         let pair_symbol = price.pair.symbol();
 
-        let entry = history.entry(pair_symbol).or_insert_with(VecDeque::new);
+        let entry = history.entry(pair_symbol).or_default();
         entry.push_back((price.mid_price, price.timestamp.timestamp()));
 
         if entry.len() > self.window_size {
@@ -80,8 +78,8 @@ impl Strategy for StatisticalArbitrage {
         Ok(())
     }
 
-    async fn analyze(&self, prices: &[PriceData]) -> ArbitrageResult<Vec<ArbitrageOpportunity>> {
-        let history = self.history.read().await;
+    fn analyze(&self, prices: &[PriceData]) -> ArbitrageResult<Vec<ArbitrageOpportunity>> {
+        let history = self.history.read().unwrap();
         let mut opportunities = Vec::new();
 
         for price in prices {
@@ -225,7 +223,7 @@ mod tests {
                 d,
                 d,
             );
-            strat.update_state(&price).await.unwrap();
+            strat.update_state(&price).unwrap();
         }
 
         // Now present a far-outlier price
@@ -236,7 +234,7 @@ mod tests {
             Decimal::from(121), // ask well above mean
         );
 
-        let opps = strat.analyze(&[outlier]).await.unwrap();
+        let opps = strat.analyze(&[outlier]).unwrap();
         assert!(
             !opps.is_empty(),
             "Should create opportunity when z-score exceeds threshold"
@@ -261,7 +259,7 @@ mod tests {
                 Decimal::from_f64_retain(*v).unwrap(),
                 Decimal::from_f64_retain(*v).unwrap(),
             );
-            strat.update_state(&price).await.unwrap();
+            strat.update_state(&price).unwrap();
         }
 
         // Present a price very close to the mean
@@ -272,7 +270,7 @@ mod tests {
             Decimal::from(100),
         );
 
-        let opps = strat.analyze(&[normal]).await.unwrap();
+        let opps = strat.analyze(&[normal]).unwrap();
         assert!(
             opps.is_empty(),
             "Should NOT create opportunity when z-score is below threshold"
@@ -292,7 +290,7 @@ mod tests {
                 d,
                 d,
             );
-            strat.update_state(&price).await.unwrap();
+            strat.update_state(&price).unwrap();
         }
 
         // Price crashes below mean → negative z-score → buy opportunity
@@ -303,7 +301,7 @@ mod tests {
             Decimal::from(81),
         );
 
-        let opps = strat.analyze(&[low]).await.unwrap();
+        let opps = strat.analyze(&[low]).unwrap();
         assert!(!opps.is_empty());
 
         let opp = &opps[0];

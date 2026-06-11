@@ -40,12 +40,39 @@ Instead of betting the entire wallet, the bot calculates an optimal size based o
 #### C. Exposure Limits
 - **Max Total Exposure**: Caps the total USD value of all open trades (relevant for future async execution).
 
-## 3. Bot Lifecycle (`bot/src/main.rs`)
+## 3. Bot Lifecycle (`bot/src/lib.rs`)
 
 The `run_trading_loop` functions as the heartbeat:
-1.  **Poll (500ms)**: Fetch latest prices from all DEXs.
-2.  **Detect**: Run `ArbitrageDetector` (Simple) and `PathFinder` (Triangular).
-3.  **Evaluate**: Pass best opportunity to `RiskManager`.
-4.  **Execute**:
+1.  **Poll (`POLL_INTERVAL_MS`, default 500ms)**: Fetch latest prices (Jupiter Price API V3).
+2.  **Merge streamed prices**: Event-driven on-chain prices (see §4) override HTTP prices for the same (DEX, pair).
+3.  **Detect**: Run `ArbitrageDetector` (Simple) and `PathFinder` (Triangular).
+4.  **Evaluate**: Pass best opportunity to `RiskManager`.
+5.  **Execute**:
     - **Dry Run**: Log outcome, simulate profit/loss.
-    - **Live**: Request quote & swap instructions from Jupiter API (HTTP), sign and send.
+    - **Live**: Request quote & swap instructions from Jupiter Swap API (`swap/v1`), sign, and submit — via a Jito bundle carrying a dynamic tip (live landed-tip percentile from the tip floor API) or via multi-RPC broadcast with a priority fee.
+
+## 4. On-Chain Account Streaming (`core/src/streaming/account_stream.rs`)
+
+When `STREAMING_POOLS` is configured, the bot subscribes to pool state over
+the Solana WebSocket `accountSubscribe` API and computes prices locally:
+- **Constant-product pools** (Raydium AMM v4 etc.): both vault token
+  accounts; spot price = decimal-adjusted reserve ratio.
+- **Concentrated-liquidity pools** (Orca Whirlpool, Raydium CLMM): the pool
+  account itself; price decoded from its Q64.64 sqrt price.
+
+Prices are emitted the moment a pool changes — no aggregator round-trip —
+and land in a shared cache that the detection loop merges each tick. A
+sanity guard (`core/src/pricing/sanity.rs`) then drops quotes deviating more
+than `PRICE_SANITY_MAX_DEVIATION_PCT` from the per-pair median, so one bad
+feed cannot fabricate phantom spreads.
+
+The legacy Raydium/Orca REST providers were removed from detection because
+those endpoints serve cached aggregate stats (minutes stale), which produced
+phantom spreads. Yellowstone gRPC (Geyser) is the planned lower-latency
+replacement for the WebSocket transport.
+
+## 5. Execution Scoreboard
+
+Two Prometheus metrics measure competitiveness end-to-end:
+- `arb_tick_to_trade_seconds` — price tick start → execution complete.
+- `arb_jito_bundles_landed_total / arb_jito_bundles_submitted_total` — bundle land rate.

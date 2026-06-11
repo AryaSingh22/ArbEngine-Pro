@@ -1,11 +1,7 @@
-use crate::types::{ArbitrageOpportunity, DexType, TokenPair};
+use crate::types::{DexType, TokenPair};
 use chrono::Utc;
 use rand::Rng;
 use rust_decimal::Decimal;
-use std::thread;
-use std::time::Duration;
-use tracing::{info, warn};
-use uuid::Uuid;
 
 #[test]
 #[ignore] // Run manually to generate logs
@@ -18,7 +14,7 @@ fn generate_comprehensive_logs() {
         .finish();
     let _ = tracing::subscriber::set_global_default(subscriber);
 
-    let pairs = vec![
+    let pairs = [
         TokenPair::new("SOL", "USDC"),
         TokenPair::new("RAY", "USDC"),
         TokenPair::new("ORCA", "USDC"),
@@ -26,7 +22,7 @@ fn generate_comprehensive_logs() {
         TokenPair::new("JUP", "USDC"),
     ];
 
-    let dexs = vec![DexType::Raydium, DexType::Orca, DexType::Jupiter];
+    let dexs = [DexType::Raydium, DexType::Orca, DexType::Jupiter];
 
     println!("🚀 Solana Arbitrage Bot starting...");
     println!("   Min profit threshold: 0.5%");

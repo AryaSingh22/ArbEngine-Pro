@@ -1,11 +1,9 @@
-use async_trait::async_trait;
+use crate::Strategy;
 use solana_arb_core::{
     types::{ArbitrageOpportunity, PriceData},
     ArbitrageResult,
 };
-use crate::Strategy;
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 /// Metadata for a strategy plugin
 #[derive(Debug, Clone)]
@@ -17,18 +15,17 @@ pub struct StrategyDescriptor {
 }
 
 /// Extended trait for strategies with lifecycle hooks and metadata
-#[async_trait]
 pub trait StrategyPlugin: Strategy {
     /// Get metadata about the strategy
     fn descriptor(&self) -> StrategyDescriptor;
 
     /// Called when the strategy is initialized
-    async fn on_load(&self) -> ArbitrageResult<()> {
+    fn on_load(&self) -> ArbitrageResult<()> {
         Ok(())
     }
 
     /// Called when the strategy is stopped or removed
-    async fn on_unload(&self) -> ArbitrageResult<()> {
+    fn on_unload(&self) -> ArbitrageResult<()> {
         Ok(())
     }
 }
@@ -52,21 +49,21 @@ impl StrategyRegistry {
     }
 
     /// Register a new strategy plugin
-    pub async fn register(&self, plugin: Box<dyn StrategyPlugin>) -> ArbitrageResult<()> {
-        plugin.on_load().await?;
-        let mut plugins = self.plugins.write().await;
+    pub fn register(&self, plugin: Box<dyn StrategyPlugin>) -> ArbitrageResult<()> {
+        plugin.on_load()?;
+        let mut plugins = self.plugins.write().unwrap();
         plugins.push(plugin);
         Ok(())
     }
 
     /// Run all enabled strategies against the provided price data
-    pub async fn analyze_all(&self, prices: &[PriceData]) -> Vec<ArbitrageOpportunity> {
-        let plugins = self.plugins.read().await;
+    pub fn analyze_all(&self, prices: &[PriceData]) -> Vec<ArbitrageOpportunity> {
+        let plugins = self.plugins.read().unwrap();
         let mut all_opps = Vec::new();
 
         for plugin in plugins.iter() {
             if plugin.descriptor().enabled {
-                match plugin.analyze(prices).await {
+                match plugin.analyze(prices) {
                     Ok(opps) => all_opps.extend(opps),
                     Err(e) => {
                         tracing::warn!("Strategy {} failed during analysis: {}", plugin.name(), e);
@@ -78,11 +75,11 @@ impl StrategyRegistry {
     }
 
     /// Update state for all enabled strategies
-    pub async fn update_all(&self, price: &PriceData) {
-        let plugins = self.plugins.read().await;
+    pub fn update_all(&self, price: &PriceData) {
+        let plugins = self.plugins.read().unwrap();
         for plugin in plugins.iter() {
             if plugin.descriptor().enabled {
-                if let Err(e) = plugin.update_state(price).await {
+                if let Err(e) = plugin.update_state(price) {
                     tracing::warn!("Strategy {} state update failed: {}", plugin.name(), e);
                 }
             }
@@ -90,8 +87,8 @@ impl StrategyRegistry {
     }
     
     /// Get count of registered strategies
-    pub async fn count(&self) -> usize {
-        self.plugins.read().await.len()
+    pub fn count(&self) -> usize {
+        self.plugins.read().unwrap().len()
     }
 }
 
@@ -106,13 +103,12 @@ mod tests {
         should_fail: bool,
     }
 
-    #[async_trait]
     impl Strategy for MockStrategy {
         fn name(&self) -> &'static str {
             "MockStrategy" // Ideally dynamic but &'static str limit
         }
 
-        async fn analyze(&self, _prices: &[PriceData]) -> ArbitrageResult<Vec<ArbitrageOpportunity>> {
+        fn analyze(&self, _prices: &[PriceData]) -> ArbitrageResult<Vec<ArbitrageOpportunity>> {
              if self.should_fail {
                  return Err(solana_arb_core::ArbitrageError::StrategyError {
                      strategy: self.name().to_string(),
@@ -139,12 +135,11 @@ mod tests {
              Ok(vec![opp])
         }
 
-        async fn update_state(&self, _price: &PriceData) -> ArbitrageResult<()> {
+        fn update_state(&self, _price: &PriceData) -> ArbitrageResult<()> {
             Ok(())
         }
     }
 
-    #[async_trait]
     impl StrategyPlugin for MockStrategy {
         fn descriptor(&self) -> StrategyDescriptor {
             StrategyDescriptor {
@@ -156,8 +151,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_registry_lifecycle() {
+    #[test]
+    fn test_registry_lifecycle() {
         let registry = StrategyRegistry::new();
         
         let plugin = MockStrategy { 
@@ -165,43 +160,43 @@ mod tests {
             should_fail: false 
         };
         
-        registry.register(Box::new(plugin)).await.unwrap();
+        registry.register(Box::new(plugin)).unwrap();
         
-        assert_eq!(registry.count().await, 1);
+        assert_eq!(registry.count(), 1);
     }
 
-    #[tokio::test]
-    async fn test_analyze_all() {
+    #[test]
+    fn test_analyze_all() {
         let registry = StrategyRegistry::new();
         registry.register(Box::new(MockStrategy { 
             name: "S1".to_string(), 
             should_fail: false 
-        })).await.unwrap();
+        })).unwrap();
 
         let prices = vec![]; // Empty prices for mock
-        let opps = registry.analyze_all(&prices).await;
+        let opps = registry.analyze_all(&prices);
         
         assert_eq!(opps.len(), 1);
     }
     
-    #[tokio::test]
-    async fn test_failed_strategy_handling() {
+    #[test]
+    fn test_failed_strategy_handling() {
         let registry = StrategyRegistry::new();
         
         // Strategy that fails
         registry.register(Box::new(MockStrategy { 
             name: "BadStrategy".to_string(), 
             should_fail: true 
-        })).await.unwrap();
+        })).unwrap();
         
         // Strategy that succeeds
         registry.register(Box::new(MockStrategy { 
             name: "GoodStrategy".to_string(), 
             should_fail: false 
-        })).await.unwrap();
+        })).unwrap();
 
         let prices = vec![]; 
-        let opps = registry.analyze_all(&prices).await;
+        let opps = registry.analyze_all(&prices);
         
         // Should get results from good strategy even if bad one fails
         assert_eq!(opps.len(), 1);

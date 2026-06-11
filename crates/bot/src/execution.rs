@@ -11,7 +11,6 @@ use reqwest::Client;
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::transaction::VersionedTransaction;
@@ -28,7 +27,12 @@ use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Keypair;
 use std::str::FromStr;
 
-const JUPITER_API_URL: &str = "https://quote-api.jup.ag/v6";
+/// Free-tier Jupiter Swap API host. The legacy quote-api.jup.ag/v6 host was
+/// sunset by Jupiter; swap/v1 on lite-api.jup.ag (free) or api.jup.ag (keyed)
+/// is the maintained replacement.
+pub const JUPITER_LITE_SWAP_API_URL: &str = "https://lite-api.jup.ag/swap/v1";
+/// Keyed Jupiter Swap API host (requires JUPITER_API_KEY via x-api-key header).
+pub const JUPITER_PRO_SWAP_API_URL: &str = "https://api.jup.ag/swap/v1";
 
 // Token Mints (Mainnet)
 pub const SOL_MINT: &str = "So11111111111111111111111111111111111111112";
@@ -50,6 +54,18 @@ pub struct ExecutionConfig {
     pub max_retries: u32,
     /// RPC commitment level (e.g., "confirmed", "finalized").
     pub rpc_commitment: String,
+    /// Pubkeys of durable nonce accounts to use for transactions.
+    pub nonce_account_pubkeys: Vec<String>,
+    /// Multiple RPC URLs for redundancy
+    pub rpc_urls: Vec<String>,
+    /// Timeout for RPC calls in milliseconds
+    pub rpc_timeout_ms: u64,
+    /// Fallback to standard RPC if JITO submission fails or times out
+    pub jito_fallback_to_rpc: bool,
+    /// Jupiter Swap API base URL (swap/v1).
+    pub jupiter_api_url: String,
+    /// Optional Jupiter API key, sent as the x-api-key header (api.jup.ag tier).
+    pub jupiter_api_key: Option<String>,
 }
 
 impl Default for ExecutionConfig {
@@ -60,6 +76,12 @@ impl Default for ExecutionConfig {
             slippage_bps: 50,
             max_retries: 3,
             rpc_commitment: "confirmed".to_string(),
+            nonce_account_pubkeys: Vec::new(),
+            rpc_urls: Vec::new(),
+            rpc_timeout_ms: 10000,
+            jito_fallback_to_rpc: true,
+            jupiter_api_url: JUPITER_LITE_SWAP_API_URL.to_string(),
+            jupiter_api_key: None,
         }
     }
 }
@@ -91,6 +113,8 @@ pub struct Executor {
     pub rpc_rate_limiter: Option<Arc<RateLimiter>>,
     /// Rate limiter for Jupiter API requests.
     pub jupiter_rate_limiter: Option<Arc<RateLimiter>>,
+    /// Cached SOL/USD price (30s TTL) for converting profit to lamports.
+    sol_price_cache: std::sync::Mutex<Option<(f64, std::time::Instant)>>,
 }
 
 /// Request body for Jupiter /swap endpoint (full transaction mode)
@@ -100,8 +124,23 @@ struct SwapRequest {
     user_public_key: String,
     #[serde(rename = "quoteResponse")]
     quote_response: serde_json::Value,
-    #[serde(rename = "computeUnitPriceMicroLamports")]
+    #[serde(
+        rename = "computeUnitPriceMicroLamports",
+        skip_serializing_if = "Option::is_none"
+    )]
     compute_unit_price_micro_lamports: Option<u64>,
+    /// e.g. {"jitoTipLamports": N} — Jupiter embeds the tip transfer in the
+    /// returned transaction, which is required for the bundle to clear the
+    /// Jito tip auction.
+    #[serde(
+        rename = "prioritizationFeeLamports",
+        skip_serializing_if = "Option::is_none"
+    )]
+    prioritization_fee_lamports: Option<serde_json::Value>,
+    /// Let Jupiter simulate and set an accurate compute unit limit instead of
+    /// the worst-case 1.4M default, so the priority fee budget prices correctly.
+    #[serde(rename = "dynamicComputeUnitLimit")]
+    dynamic_compute_unit_limit: bool,
 }
 
 /// Response from Jupiter /swap endpoint
@@ -120,7 +159,10 @@ struct SwapInstructionsRequest {
     quote_response: serde_json::Value,
     #[serde(rename = "wrapAndUnwrapSol")]
     wrap_and_unwrap_sol: bool,
-    #[serde(rename = "computeUnitPriceMicroLamports")]
+    #[serde(
+        rename = "computeUnitPriceMicroLamports",
+        skip_serializing_if = "Option::is_none"
+    )]
     compute_unit_price_micro_lamports: Option<u64>,
 }
 
@@ -213,6 +255,7 @@ impl Executor {
             alt_manager: None,
             rpc_rate_limiter: None,
             jupiter_rate_limiter: None,
+            sol_price_cache: std::sync::Mutex::new(None),
         }
     }
 
@@ -231,6 +274,118 @@ impl Executor {
         self.jupiter_rate_limiter = jupiter;
     }
 
+    /// Builds a GET request to the Jupiter API, attaching the API key if configured.
+    fn jupiter_get(&self, url: &str) -> reqwest::RequestBuilder {
+        let req = self.client.get(url);
+        match &self.config.jupiter_api_key {
+            Some(key) => req.header("x-api-key", key),
+            None => req,
+        }
+    }
+
+    /// Builds a POST request to the Jupiter API, attaching the API key if configured.
+    fn jupiter_post(&self, url: &str) -> reqwest::RequestBuilder {
+        let req = self.client.post(url);
+        match &self.config.jupiter_api_key {
+            Some(key) => req.header("x-api-key", key),
+            None => req,
+        }
+    }
+
+    /// Cached SOL/USD price from the Jupiter Price API V3 (30s TTL).
+    async fn sol_price_usd(&self) -> Option<f64> {
+        const TTL: std::time::Duration = std::time::Duration::from_secs(30);
+        if let Some((price, fetched_at)) = *self.sol_price_cache.lock().unwrap() {
+            if fetched_at.elapsed() < TTL {
+                return Some(price);
+            }
+        }
+
+        let base = std::env::var("JUPITER_PRICE_API_URL").unwrap_or_else(|_| {
+            if self.config.jupiter_api_key.is_some() {
+                "https://api.jup.ag/price/v3".to_string()
+            } else {
+                "https://lite-api.jup.ag/price/v3".to_string()
+            }
+        });
+        let url = format!("{}?ids={}", base, SOL_MINT);
+        let value: serde_json::Value = self.jupiter_get(&url).send().await.ok()?.json().await.ok()?;
+        let price = value.get(SOL_MINT)?.get("usdPrice")?.as_f64()?;
+        if price <= 0.0 {
+            return None;
+        }
+        *self.sol_price_cache.lock().unwrap() = Some((price, std::time::Instant::now()));
+        Some(price)
+    }
+
+    /// Cap a Jito tip at JITO_TIP_MAX_PROFIT_FRACTION (default 0.5) of the
+    /// expected profit, converted to lamports via the live SOL price.
+    /// Tipping more than the trade earns is a guaranteed loss even on a win.
+    /// Returns the uncapped tip when profit or SOL price is unknown.
+    async fn cap_tip_by_profit(&self, tip: u64, profit_usd: Option<Decimal>) -> u64 {
+        let fraction: f64 = std::env::var("JITO_TIP_MAX_PROFIT_FRACTION")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0.5);
+        let Some(profit) = profit_usd.and_then(|p| p.to_f64()).filter(|p| *p > 0.0) else {
+            return tip;
+        };
+        let Some(sol_price) = self.sol_price_usd().await else {
+            return tip;
+        };
+        let cap = (profit * fraction / sol_price * 1_000_000_000.0) as u64;
+        // 1000 lamports is Jito's minimum accepted tip; below that the
+        // bundle is rejected outright, so don't cap past it.
+        let capped = tip.min(cap.max(1_000));
+        if capped < tip {
+            info!(
+                "💸 Tip capped by expected profit: {} -> {} lamports (profit ${:.4})",
+                tip, capped, profit
+            );
+        }
+        capped
+    }
+
+    /// Estimate a competitive per-compute-unit priority fee from recent
+    /// on-chain fees (75th percentile), clamped to [PRIORITY_FEE, 10x].
+    /// Falls back to the static fee when disabled or on RPC failure.
+    async fn estimate_priority_fee(&self, rpc_url: &str) -> u64 {
+        let base = self.config.priority_fee_micro_lamports;
+        let enabled = std::env::var("DYNAMIC_PRIORITY_FEES")
+            .map(|v| v == "true" || v == "1")
+            .unwrap_or(true);
+        if !enabled {
+            return base;
+        }
+
+        let multi_client = self.get_multi_rpc_client(rpc_url);
+        match multi_client.clients[0].get_recent_prioritization_fees(&[]).await {
+            Ok(fees) => {
+                let mut nonzero: Vec<u64> = fees
+                    .iter()
+                    .map(|f| f.prioritization_fee)
+                    .filter(|&f| f > 0)
+                    .collect();
+                if nonzero.is_empty() {
+                    return base;
+                }
+                nonzero.sort_unstable();
+                let p75 = nonzero[(nonzero.len() * 3 / 4).min(nonzero.len() - 1)];
+                let fee = p75.clamp(base, base.saturating_mul(10));
+                debug!(
+                    "⛽ Dynamic priority fee: {} micro-lamports/CU (p75 of {} recent fees)",
+                    fee,
+                    nonzero.len()
+                );
+                fee
+            }
+            Err(e) => {
+                debug!("Priority fee estimation failed ({}); using static fee", e);
+                base
+            }
+        }
+    }
+
     /// Fetches a swap quote from the Jupiter API.
     ///
     /// # Arguments
@@ -244,13 +399,15 @@ impl Executor {
         output_mint: &str,
         amount: u64,
     ) -> Result<serde_json::Value> {
+        // restrictIntermediateTokens keeps routes on liquid hops, which
+        // Jupiter recommends for better landing rates.
         let url = format!(
-            "{}/quote?inputMint={}&outputMint={}&amount={}&slippageBps={}",
-            JUPITER_API_URL, input_mint, output_mint, amount, self.config.slippage_bps
+            "{}/quote?inputMint={}&outputMint={}&amount={}&slippageBps={}&restrictIntermediateTokens=true",
+            self.config.jupiter_api_url, input_mint, output_mint, amount, self.config.slippage_bps
         );
 
         debug!("Fetching quote from {}", url);
-        let response = self.client.get(&url).send().await?;
+        let response = self.jupiter_get(&url).send().await?;
         if !response.status().is_success() {
             let err_text = response.text().await?;
             return Err(anyhow!("Jupiter quote failed: {}", err_text));
@@ -261,7 +418,8 @@ impl Executor {
 
     /// Checks the SOL balance of the provided wallet.
     pub async fn check_balance(&self, wallet: &Wallet, rpc_url: &str) -> Result<u64> {
-        let client = RpcClient::new(rpc_url.to_string());
+        let multi_rpc_client = self.get_multi_rpc_client(rpc_url);
+        let client = &multi_rpc_client.clients[0];
         let pubkey = Pubkey::from_str(&wallet.pubkey())
             .map_err(|e| anyhow!("Invalid wallet pubkey: {}", e))?;
         Ok(client.get_balance(&pubkey).await?)
@@ -350,20 +508,30 @@ impl Executor {
             }
         };
 
+        // Bundles are priced by the Jito tip auction, so route the fee budget
+        // into an embedded tip transfer; plain RPC submission competes via the
+        // per-compute-unit priority fee instead.
+        let (cu_price, prioritization_fee) = if !submit {
+            (None, None)
+        } else if let Some(jito) = jito_client {
+            let tip = jito.get_dynamic_tip_lamports().await;
+            let tip = self.cap_tip_by_profit(tip, opp.estimated_profit_usd).await;
+            (None, Some(serde_json::json!({ "jitoTipLamports": tip })))
+        } else {
+            (Some(self.estimate_priority_fee(rpc_url).await), None)
+        };
+
         let swap_req = SwapRequest {
             user_public_key: wallet.pubkey(),
             quote_response: quote,
-            compute_unit_price_micro_lamports: if submit {
-                Some(self.config.priority_fee_micro_lamports)
-            } else {
-                None
-            },
+            compute_unit_price_micro_lamports: cu_price,
+            prioritization_fee_lamports: prioritization_fee,
+            dynamic_compute_unit_limit: true,
         };
 
         debug!("Requesting swap instruction...");
         let response = self
-            .client
-            .post(format!("{}/swap", JUPITER_API_URL))
+            .jupiter_post(&format!("{}/swap", self.config.jupiter_api_url))
             .json(&swap_req)
             .send()
             .await?;
@@ -506,22 +674,23 @@ impl Executor {
         }
 
         let commitment = self.parse_commitment();
-        let client = RpcClient::new_with_commitment(rpc_url.to_string(), commitment);
+        let multi_client = self.get_multi_rpc_client(rpc_url);
 
         let config = RpcSendTransactionConfig {
             skip_preflight: true,
             ..Default::default()
         };
 
-        let signature = client.send_transaction_with_config(&signed_tx, config).await?;
+        let signature = multi_client.send_transaction(&signed_tx, config).await?;
 
         info!(
             "📡 Transaction sent: {}. Waiting for confirmation...",
             signature
         );
-        match client.confirm_transaction_with_spinner(
+        let client_for_confirm = &multi_client.clients[0];
+        match client_for_confirm.confirm_transaction_with_spinner(
             &signature,
-            &client.get_latest_blockhash().await?,
+            &multi_client.get_latest_blockhash().await?,
             commitment,
         ).await {
             Ok(_) => {
@@ -543,6 +712,18 @@ impl Executor {
         }
     }
 
+    fn get_multi_rpc_client(&self, fallback_url: &str) -> solana_arb_core::multi_rpc::MultiRpcClient {
+        let mut urls = self.config.rpc_urls.clone();
+        if urls.is_empty() {
+            urls.push(fallback_url.to_string());
+        }
+        solana_arb_core::multi_rpc::MultiRpcClient::new(
+            urls,
+            self.config.rpc_timeout_ms,
+            self.parse_commitment(),
+        )
+    }
+
     /// Execute a flash loan arbitrage trade using Jupiter's `/swap-instructions` API.
     ///
     /// Instead of calling `/swap` to get a full serialized transaction and manually
@@ -556,7 +737,7 @@ impl Executor {
         amount_usd: Decimal,
         submit: bool,
         rpc_url: &str,
-        _jito_client: Option<&JitoClient>,
+        jito_client: Option<&JitoClient>,
     ) -> Result<TradeResult> {
         info!(
             "⚡ Executing FLASH LOAN trade for opportunity: {} (amount: {} USD)",
@@ -622,6 +803,23 @@ impl Executor {
             swap_instructions.push(Self::convert_jupiter_instruction(cleanup)?);
         }
 
+        // Append Jito tip instruction if Jito MEV protection is enabled
+        if let Some(jito) = jito_client {
+            let tip_account = Pubkey::from_str(&jito.get_tip_account().await?)?;
+            let tip_amount = jito.get_dynamic_tip_lamports().await;
+            let tip_amount = self
+                .cap_tip_by_profit(tip_amount, opp.estimated_profit_usd)
+                .await;
+            
+            let tip_ix = solana_sdk::system_instruction::transfer(
+                &Pubkey::from_str(&wallet.pubkey())?,
+                &tip_account,
+                tip_amount,
+            );
+            swap_instructions.push(tip_ix);
+            info!("💸 Appended Jito tip instruction ({} lamports to {})", tip_amount, tip_account);
+        }
+
         // 6. Resolve Address Lookup Tables (if any)
         let lookup_tables = if !swap_instructions_resp.address_lookup_table_addresses.is_empty() {
             if let Some(alt_manager) = &self.alt_manager {
@@ -639,9 +837,37 @@ impl Executor {
             vec![]
         };
 
-        // 7. Build flash loan transaction via FlashLoanTxBuilder
-        let rpc_client_instance = RpcClient::new(rpc_url.to_string());
-        let recent_blockhash = rpc_client_instance.get_latest_blockhash().await?;
+        // 7. Use Durable Nonce or Recent Blockhash
+        // Durable Nonce Lifecycle:
+        // a) Create Nonce Account: An account funded and initialized offline or prior to execution.
+        // b) Fetch Nonce: Bot reads the account state to get the durable blockhash.
+        // c) Advance Nonce Instruction: Bot constructs an `AdvanceNonce` instruction to invalidate the used nonce.
+        // d) Prepend Instruction: The `AdvanceNonce` instruction is placed as the VERY FIRST instruction in the transaction.
+        // e) Assign Blockhash: The fetched durable blockhash is set as the transaction's recent blockhash.
+        let multi_rpc_client = self.get_multi_rpc_client(rpc_url);
+        let rpc_client_instance = &multi_rpc_client.clients[0];
+        
+        let mut advance_nonce_ix = None;
+        let recent_blockhash = if !self.config.nonce_account_pubkeys.is_empty() {
+            // Use the first nonce account for now (ideally round-robin in the future)
+            let nonce_pubkey_str = &self.config.nonce_account_pubkeys[0];
+            let nonce_pubkey = Pubkey::from_str(nonce_pubkey_str)?;
+            
+            // Fetch the durable nonce blockhash
+            let blockhash_str = solana_arb_core::nonce::fetch_nonce_account(rpc_client_instance, &nonce_pubkey).await?;
+            
+            // Create the instruction to advance the nonce
+            let auth_pubkey = Pubkey::from_str(&wallet.pubkey())?;
+            advance_nonce_ix = Some(solana_arb_core::nonce::create_advance_nonce_instruction(
+                &nonce_pubkey,
+                &auth_pubkey, // The authorized account
+            ));
+            
+            blockhash_str.parse()?
+        } else {
+            // Fallback to recent blockhash
+            rpc_client_instance.get_latest_blockhash().await?
+        };
 
         let tx = self
             .flash_loan_builder
@@ -652,6 +878,7 @@ impl Executor {
                 swap_instructions,
                 &lookup_tables,
                 recent_blockhash,
+                advance_nonce_ix,
             )
             .map_err(|e| anyhow!("Failed to build flash loan tx: {}", e))?;
 
@@ -684,10 +911,51 @@ impl Executor {
 
         // 9. Submit or simulate
         let signature = if submit {
-            let client = RpcClient::new(rpc_url.to_string());
-            let sig = client.send_and_confirm_transaction(&tx).await?;
-            info!("✅ Flash loan transaction confirmed: {}", sig);
-            sig.to_string()
+            if let Some(jito) = jito_client {
+                let signed_tx_bytes = bincode::serialize(&tx)?;
+                let signed_tx_base64 = BASE64_ENGINE.encode(signed_tx_bytes);
+                
+                let bundle_id = jito.send_bundle(&signed_tx_base64).await?;
+                info!("🚀 Sent flash loan tx via Jito! Bundle ID: {}", bundle_id);
+                
+                // Poll for bundle status
+                let mut status_confirmed = false;
+                for _ in 0..10 {
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    if let Ok(Some(status)) = jito.get_bundle_status(&bundle_id).await {
+                        if status.confirmation_status == "confirmed" || status.confirmation_status == "finalized" {
+                            status_confirmed = true;
+                            break;
+                        }
+                    }
+                }
+                
+                if !status_confirmed && self.config.jito_fallback_to_rpc {
+                    warn!("⏳ Jito bundle timeout. Falling back to multi-client RPC array...");
+                    let config = solana_rpc_client_api::config::RpcSendTransactionConfig {
+                        skip_preflight: true,
+                        ..Default::default()
+                    };
+                    let sig = multi_rpc_client.send_transaction(&tx, config).await?;
+                    let commitment = self.parse_commitment();
+                    let _ = rpc_client_instance.confirm_transaction_with_spinner(&sig, &multi_rpc_client.get_latest_blockhash().await?, commitment).await;
+                    info!("✅ Fallback flash loan transaction confirmed: {}", sig);
+                } else if status_confirmed {
+                    info!("✅ Jito bundle confirmed!");
+                }
+                
+                bundle_id
+            } else {
+                let config = solana_rpc_client_api::config::RpcSendTransactionConfig {
+                    skip_preflight: true,
+                    ..Default::default()
+                };
+                let sig = multi_rpc_client.send_transaction(&tx, config).await?;
+                let commitment = self.parse_commitment();
+                let _ = rpc_client_instance.confirm_transaction_with_spinner(&sig, &multi_rpc_client.get_latest_blockhash().await?, commitment).await;
+                info!("✅ Flash loan transaction confirmed: {}", sig);
+                sig.to_string()
+            }
         } else {
             info!("📝 [SIMULATION] Flash loan transaction would be submitted here.");
             "simulated_flash_loan_tx".to_string()
@@ -720,8 +988,7 @@ impl Executor {
         };
 
         let response = self
-            .client
-            .post(format!("{}/swap-instructions", JUPITER_API_URL))
+            .jupiter_post(&format!("{}/swap-instructions", self.config.jupiter_api_url))
             .json(&req)
             .send()
             .await?;

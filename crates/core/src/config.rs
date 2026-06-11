@@ -57,6 +57,23 @@ pub struct Config {
     pub enable_metrics: bool,
     /// Metrics server port
     pub metrics_port: u16,
+
+    // --- New Configuration parameters for refactoring ---
+    /// Pubkeys of durable nonce accounts
+    pub nonce_account_pubkeys: Vec<String>,
+    /// Multiple RPC URLs for redundancy
+    pub rpc_urls: Vec<String>,
+    /// Timeout for RPC calls in milliseconds
+    pub rpc_timeout_ms: u64,
+    /// Pubkeys for JITO tip accounts
+    pub jito_tip_accounts: Vec<String>,
+    /// Fallback to standard RPC if JITO submission fails
+    pub jito_fallback_to_rpc: bool,
+    /// Jupiter Swap API base URL. Defaults to the keyed api.jup.ag host when
+    /// JUPITER_API_KEY is set, otherwise the free lite-api.jup.ag host.
+    pub jupiter_swap_api_url: String,
+    /// Optional Jupiter API key (sent as x-api-key) for the api.jup.ag tier
+    pub jupiter_api_key: Option<String>,
 }
 
 impl Config {
@@ -144,6 +161,39 @@ impl Config {
                 .unwrap_or_else(|_| "9090".to_string())
                 .parse()
                 .unwrap_or(9090),
+            nonce_account_pubkeys: env::var("NONCE_ACCOUNT_PUBKEYS")
+                .unwrap_or_default()
+                .split(',')
+                .filter(|s| !s.is_empty())
+                .map(|s| s.trim().to_string())
+                .collect(),
+            rpc_urls: env::var("RPC_URLS")
+                .unwrap_or_default()
+                .split(',')
+                .filter(|s| !s.is_empty())
+                .map(|s| s.trim().to_string())
+                .collect(),
+            rpc_timeout_ms: env::var("RPC_TIMEOUT_MS")
+                .unwrap_or_else(|_| "10000".to_string())
+                .parse()
+                .unwrap_or(10000),
+            jito_tip_accounts: env::var("JITO_TIP_ACCOUNTS")
+                .unwrap_or_default()
+                .split(',')
+                .filter(|s| !s.is_empty())
+                .map(|s| s.trim().to_string())
+                .collect(),
+            jito_fallback_to_rpc: env::var("JITO_FALLBACK_TO_RPC")
+                .map(|v| v == "true" || v == "1")
+                .unwrap_or(true),
+            jupiter_swap_api_url: env::var("JUPITER_SWAP_API_URL").unwrap_or_else(|_| {
+                if env::var("JUPITER_API_KEY").map(|k| !k.is_empty()).unwrap_or(false) {
+                    "https://api.jup.ag/swap/v1".to_string()
+                } else {
+                    "https://lite-api.jup.ag/swap/v1".to_string()
+                }
+            }),
+            jupiter_api_key: env::var("JUPITER_API_KEY").ok().filter(|k| !k.is_empty()),
         })
     }
 }
@@ -177,6 +227,13 @@ impl Default for Config {
             max_concurrent_trades: 1,
             enable_metrics: true,
             metrics_port: 9090,
+            nonce_account_pubkeys: vec![],
+            rpc_urls: vec![],
+            rpc_timeout_ms: 10000,
+            jito_tip_accounts: vec![],
+            jito_fallback_to_rpc: true,
+            jupiter_swap_api_url: "https://lite-api.jup.ag/swap/v1".to_string(),
+            jupiter_api_key: None,
         }
     }
 }

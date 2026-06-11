@@ -1,4 +1,4 @@
-[workspace]
+﻿[workspace]
 members = [
     "crates/core",
     # "crates/collector", - DISABLED to fix build conflict
@@ -20,7 +20,7 @@ license = "MIT"
 # Async Runtime
 tokio = { version = "1", features = ["full"] }
 
-# Serialization — pinned to >=1.0.228 to align serde_core with bitflags 2.10
+# Serialization - pinned to >=1.0.228 to align serde_core with bitflags 2.10
 serde = { version = ">=1.0.228", features = ["derive"] }
 serde_json = "1"
 
@@ -33,9 +33,6 @@ rust_decimal = { version = "1", features = ["serde"] }
 # Error handling
 thiserror = "1"
 anyhow = "1"
-
-# Async traits
-async-trait = "0.1"
 
 # Database - default-features=false and NO MACROS to avoid pulling mysql/sqlite
 # sqlx = { version = "0.7", features = ["postgres", "runtime-tokio-native-tls", "chrono", "rust_decimal"], default-features = false }
@@ -64,8 +61,12 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Configuration
 dotenvy = "0.15"
 
-# Solana SDK  
-solana-sdk = "1.18"
-solana-rpc-client = "1.18"
-solana-rpc-client-api = "1.18"
+# Solana SDK (Agave 2.0 line; 1.18 predates the Solana Labs -> Agave handoff).
+# Held at 2.0: from 2.1 the SDK pulls solana-secp256r1-program -> openssl,
+# which cannot build on this Windows host (no perl for vendored OpenSSL).
+# Bump past 2.0 once perl/OpenSSL is available or the build moves to Linux.
+solana-sdk = "~2.0"
+solana-rpc-client = "~2.0"
+solana-rpc-client-api = "~2.0"
 bs58 = "0.5"
+

@@ -1,10 +1,9 @@
 use crate::Strategy;
-use async_trait::async_trait;
 use solana_arb_core::{
     types::{ArbitrageOpportunity, PriceData},
     ArbitrageResult,
 };
-use tokio::sync::RwLock;
+use std::sync::RwLock;
 
 pub struct LatencyArbitrage {
     // Track last update time to detect stale prices vs fresh updates
@@ -25,19 +24,18 @@ impl LatencyArbitrage {
     }
 }
 
-#[async_trait]
 impl Strategy for LatencyArbitrage {
     fn name(&self) -> &'static str {
         "Latency Arbitrage (Oracle Front-Running)"
     }
 
-    async fn update_state(&self, price: &PriceData) -> ArbitrageResult<()> {
-        let mut last = self.last_update.write().await;
+    fn update_state(&self, price: &PriceData) -> ArbitrageResult<()> {
+        let mut last = self.last_update.write().unwrap();
         last.insert(price.pair.symbol(), price.timestamp.timestamp_millis());
         Ok(())
     }
 
-    async fn analyze(&self, _prices: &[PriceData]) -> ArbitrageResult<Vec<ArbitrageOpportunity>> {
+    fn analyze(&self, _prices: &[PriceData]) -> ArbitrageResult<Vec<ArbitrageOpportunity>> {
         // Latency arb logic:
         // Compare timestamps of same pair across different DEXs.
         // If one DEX is significantly lagging (e.g., Oracle update pending), trade against it.

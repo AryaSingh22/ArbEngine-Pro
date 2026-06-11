@@ -11,13 +11,13 @@ chrono = { workspace = true }
 rust_decimal = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
-async-trait = { workspace = true }
 tracing = { workspace = true }
 futures-util = "0.3"
 uuid = { version = "1", features = ["v4", "serde"] }
 solana-sdk = { workspace = true }
 solana-rpc-client = { workspace = true }
 rand = "0.8"
+base64 = "0.22"
 
 # Optional - for HTTP-based DEX providers
 reqwest = { workspace = true, optional = true }
@@ -36,6 +36,8 @@ redis = { workspace = true, optional = true }
 simd-json = "0.17.0"
 memmap2 = "0.9.9"
 bincode = "1.3"
+futures = "0.3.32"
+solana-rpc-client-api = { workspace = true }
 
 
 

@@ -10,7 +10,11 @@ pub mod orca;
 #[cfg(feature = "http")]
 pub mod raydium;
 
-use async_trait::async_trait;
+use std::future::Future;
+use std::pin::Pin;
+
+pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
 use tokio::sync::mpsc;
 
 use crate::{ArbitrageResult, DexType, PriceData, TokenPair};
@@ -19,7 +23,6 @@ use crate::{ArbitrageResult, DexType, PriceData, TokenPair};
 pub type PriceStream = mpsc::Receiver<PriceData>;
 
 /// Trait for DEX price data providers
-#[async_trait]
 pub trait DexProvider: Send + Sync {
     /// Returns the DEX type this provider connects to
     fn dex_type(&self) -> DexType;
@@ -30,27 +33,29 @@ pub trait DexProvider: Send + Sync {
     }
 
     /// Get the current price for a specific trading pair
-    async fn get_price(&self, pair: &TokenPair) -> ArbitrageResult<PriceData>;
+    fn get_price<'a>(&'a self, pair: &'a TokenPair) -> BoxFuture<'a, ArbitrageResult<PriceData>>;
 
     /// Get prices for multiple trading pairs
-    async fn get_prices(&self, pairs: &[TokenPair]) -> ArbitrageResult<Vec<PriceData>> {
-        let mut prices = Vec::with_capacity(pairs.len());
-        for pair in pairs {
-            match self.get_price(pair).await {
-                Ok(price) => prices.push(price),
-                Err(e) => {
-                    tracing::warn!("Failed to get price for {}: {}", pair, e);
+    fn get_prices<'a>(&'a self, pairs: &'a [TokenPair]) -> BoxFuture<'a, ArbitrageResult<Vec<PriceData>>> {
+        Box::pin(async move {
+            let mut prices = Vec::with_capacity(pairs.len());
+            for pair in pairs {
+                match self.get_price(pair).await {
+                    Ok(price) => prices.push(price),
+                    Err(e) => {
+                        tracing::warn!("Failed to get price for {}: {}", pair, e);
+                    }
                 }
             }
-        }
-        Ok(prices)
+            Ok(prices)
+        })
     }
 
     /// Subscribe to real-time price updates for the given pairs
-    async fn subscribe(&self, pairs: Vec<TokenPair>) -> ArbitrageResult<PriceStream>;
+    fn subscribe<'a>(&'a self, pairs: Vec<TokenPair>) -> BoxFuture<'a, ArbitrageResult<PriceStream>>;
 
     /// Check if the provider is connected and healthy
-    async fn health_check(&self) -> ArbitrageResult<bool>;
+    fn health_check<'a>(&'a self) -> BoxFuture<'a, ArbitrageResult<bool>>;
 }
 
 /// Manager for multiple DEX providers.

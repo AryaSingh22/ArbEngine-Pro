@@ -2,7 +2,7 @@
 //!
 //! Orca is a popular AMM DEX on Solana with Whirlpools for concentrated liquidity.
 
-use async_trait::async_trait;
+
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use tokio::sync::mpsc;
@@ -56,109 +56,114 @@ impl Default for OrcaProvider {
     }
 }
 
-#[async_trait]
 impl DexProvider for OrcaProvider {
     fn dex_type(&self) -> DexType {
         DexType::Orca
     }
 
-    async fn get_price(&self, pair: &TokenPair) -> ArbitrageResult<PriceData> {
-        let response: OrcaWhirlpoolList = self
-            .client
-            .get(ORCA_WHIRLPOOL_API)
-            .send()
-            .await?
-            .json()
-            .await?;
+    fn get_price<'a>(&'a self, pair: &'a TokenPair) -> crate::dex::BoxFuture<'a, ArbitrageResult<PriceData>> {
+        Box::pin(async move {
+            let response: OrcaWhirlpoolList = self
+                .client
+                .get(ORCA_WHIRLPOOL_API)
+                .send()
+                .await?
+                .json()
+                .await?;
 
-        let whirlpool = response
-            .whirlpools
-            .iter()
-            .find(|w| {
-                (w.token_a.symbol == pair.base && w.token_b.symbol == pair.quote)
-                    || (w.token_a.symbol == pair.quote && w.token_b.symbol == pair.base)
-            })
-            .ok_or_else(|| {
-                ArbitrageError::PriceFetch(format!("Pair {} not found on Orca", pair))
-            })?;
+            let whirlpool = response
+                .whirlpools
+                .iter()
+                .find(|w| {
+                    (w.token_a.symbol == pair.base && w.token_b.symbol == pair.quote)
+                        || (w.token_a.symbol == pair.quote && w.token_b.symbol == pair.base)
+                })
+                .ok_or_else(|| {
+                    ArbitrageError::PriceFetch(format!("Pair {} not found on Orca", pair))
+                })?;
 
-        let mut price = Decimal::try_from(whirlpool.price)
-            .map_err(|e| ArbitrageError::PriceFetch(format!("Invalid price: {}", e)))?;
+            let mut price = Decimal::try_from(whirlpool.price)
+                .map_err(|e| ArbitrageError::PriceFetch(format!("Invalid price: {}", e)))?;
 
-        // Invert if tokens are reversed
-        if whirlpool.token_a.symbol == pair.quote {
-            price = Decimal::ONE / price;
-        }
+            // Invert if tokens are reversed
+            if whirlpool.token_a.symbol == pair.quote {
+                price = Decimal::ONE / price;
+            }
 
-        // Orca Whirlpools have variable spreads, estimate ~0.3%
-        let spread = price * Decimal::new(30, 5); // 0.03% each side
-        let bid = price - spread;
-        let ask = price + spread;
+            // Orca Whirlpools have variable spreads, estimate ~0.3%
+            let spread = price * Decimal::new(30, 5); // 0.03% each side
+            let bid = price - spread;
+            let ask = price + spread;
 
-        let mut price_data = PriceData::new(DexType::Orca, pair.clone(), bid, ask);
+            let mut price_data = PriceData::new(DexType::Orca, pair.clone(), bid, ask);
 
-        if let Some(vol) = whirlpool.volume_24h {
-            price_data.volume_24h = Some(Decimal::try_from(vol).unwrap_or_default());
-        }
-        if let Some(tvl) = whirlpool.tvl {
-            price_data.liquidity = Some(Decimal::try_from(tvl).unwrap_or_default());
-        }
+            if let Some(vol) = whirlpool.volume_24h {
+                price_data.volume_24h = Some(Decimal::try_from(vol).unwrap_or_default());
+            }
+            if let Some(tvl) = whirlpool.tvl {
+                price_data.liquidity = Some(Decimal::try_from(tvl).unwrap_or_default());
+            }
 
-        Ok(price_data)
+            Ok(price_data)
+        })
     }
 
-    async fn subscribe(&self, pairs: Vec<TokenPair>) -> ArbitrageResult<PriceStream> {
-        let (tx, rx) = mpsc::channel(100);
-        let client = self.client.clone();
+    fn subscribe<'a>(&'a self, pairs: Vec<TokenPair>) -> crate::dex::BoxFuture<'a, ArbitrageResult<PriceStream>> {
+        Box::pin(async move {
+            let (tx, rx) = mpsc::channel(100);
+            let client = self.client.clone();
 
-        tokio::spawn(async move {
-            loop {
-                if let Ok(response) = client.get(ORCA_WHIRLPOOL_API).send().await {
-                    if let Ok(data) = response.json::<OrcaWhirlpoolList>().await {
-                        for pair in &pairs {
-                            if let Some(whirlpool) = data.whirlpools.iter().find(|w| {
-                                (w.token_a.symbol == pair.base && w.token_b.symbol == pair.quote)
-                                    || (w.token_a.symbol == pair.quote
-                                        && w.token_b.symbol == pair.base)
-                            }) {
-                                if let Ok(mut price) = Decimal::try_from(whirlpool.price) {
-                                    if whirlpool.token_a.symbol == pair.quote {
-                                        price = Decimal::ONE / price;
-                                    }
+            tokio::spawn(async move {
+                loop {
+                    if let Ok(response) = client.get(ORCA_WHIRLPOOL_API).send().await {
+                        if let Ok(data) = response.json::<OrcaWhirlpoolList>().await {
+                            for pair in &pairs {
+                                if let Some(whirlpool) = data.whirlpools.iter().find(|w| {
+                                    (w.token_a.symbol == pair.base && w.token_b.symbol == pair.quote)
+                                        || (w.token_a.symbol == pair.quote
+                                            && w.token_b.symbol == pair.base)
+                                }) {
+                                    if let Ok(mut price) = Decimal::try_from(whirlpool.price) {
+                                        if whirlpool.token_a.symbol == pair.quote {
+                                            price = Decimal::ONE / price;
+                                        }
 
-                                    let spread = price * Decimal::new(30, 5);
-                                    let bid = price - spread;
-                                    let ask = price + spread;
+                                        let spread = price * Decimal::new(30, 5);
+                                        let bid = price - spread;
+                                        let ask = price + spread;
 
-                                    let mut price_data =
-                                        PriceData::new(DexType::Orca, pair.clone(), bid, ask);
+                                        let mut price_data =
+                                            PriceData::new(DexType::Orca, pair.clone(), bid, ask);
 
-                                    if let Some(vol) = whirlpool.volume_24h {
-                                        price_data.volume_24h = Decimal::try_from(vol).ok();
-                                    }
-                                    if let Some(tvl) = whirlpool.tvl {
-                                        price_data.liquidity = Decimal::try_from(tvl).ok();
-                                    }
+                                        if let Some(vol) = whirlpool.volume_24h {
+                                            price_data.volume_24h = Decimal::try_from(vol).ok();
+                                        }
+                                        if let Some(tvl) = whirlpool.tvl {
+                                            price_data.liquidity = Decimal::try_from(tvl).ok();
+                                        }
 
-                                    if tx.send(price_data).await.is_err() {
-                                        return;
+                                        if tx.send(price_data).await.is_err() {
+                                            return;
+                                        }
                                     }
                                 }
                             }
                         }
                     }
+
+                    // Poll every 500ms
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                 }
+            });
 
-                // Poll every 500ms
-                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-            }
-        });
-
-        Ok(rx)
+            Ok(rx)
+        })
     }
 
-    async fn health_check(&self) -> ArbitrageResult<bool> {
-        let response = self.client.get(ORCA_WHIRLPOOL_API).send().await?;
-        Ok(response.status().is_success())
+    fn health_check<'a>(&'a self) -> crate::dex::BoxFuture<'a, ArbitrageResult<bool>> {
+        Box::pin(async move {
+            let response = self.client.get(ORCA_WHIRLPOOL_API).send().await?;
+            Ok(response.status().is_success())
+        })
     }
 }
