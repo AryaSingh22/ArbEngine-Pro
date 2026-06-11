@@ -4,7 +4,7 @@ use solana_arb_core::{
     rate_limiter::RateLimiter,
     risk::{RiskConfig, RiskManager, TradeOutcome},
     history::HistoryRecorder,
-    types::{TokenPair, ArbitrageOpportunity, DexType, TradeResult},
+    types::{TokenPair, ArbitrageOpportunity, DexType},
     Uuid,
 };
 use std::sync::Arc;

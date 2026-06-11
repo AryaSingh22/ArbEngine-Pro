@@ -7,7 +7,6 @@ edition = "2021"
 solana-arb-core = { path = "../core" }
 solana-arb-dex-plugins = { path = "../dex-plugins" }
 tokio = { workspace = true }
-async-trait = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 rust_decimal = { workspace = true }

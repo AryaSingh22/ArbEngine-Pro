@@ -13,6 +13,8 @@ pub mod error;
 pub mod events;
 pub mod flash_loan;
 pub mod history;
+pub mod nonce;
+pub mod multi_rpc;
 pub mod http;
 pub mod parsers;
 pub mod pathfinding;

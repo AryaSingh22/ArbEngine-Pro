@@ -39,6 +39,7 @@ impl FlashLoanTxBuilder {
     }
 
     /// Build complete flash loan transaction (V0 with ALT support)
+    #[allow(clippy::too_many_arguments)]
     pub fn build_transaction(
         &self,
         opportunity: &ArbitrageOpportunity,
@@ -47,8 +48,14 @@ impl FlashLoanTxBuilder {
         swap_instructions: Vec<Instruction>,
         lookup_tables: &[AddressLookupTableAccount],
         recent_blockhash: solana_sdk::hash::Hash,
+        advance_nonce_ix: Option<Instruction>,
     ) -> Result<VersionedTransaction, Box<dyn std::error::Error>> {
         let mut all_instructions = Vec::new();
+
+        // 0. Advance Durable Nonce (must be the VERY FIRST instruction)
+        if let Some(ix) = advance_nonce_ix {
+            all_instructions.push(ix);
+        }
 
         // 1. Compute budget
         all_instructions.push(ComputeBudgetInstruction::set_compute_unit_limit(1_400_000));

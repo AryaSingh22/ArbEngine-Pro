@@ -3,7 +3,6 @@
 //! Defines the traits for interacting with flash loan providers on Solana.
 
 use crate::error::ArbitrageResult;
-use async_trait::async_trait;
 use rust_decimal::Decimal;
 use solana_sdk::instruction::Instruction;
 use solana_sdk::pubkey::Pubkey;
@@ -16,13 +15,12 @@ pub struct FlashLoanQuote {
     pub fee: Decimal,
 }
 
-#[async_trait]
 pub trait FlashLoanProvider: Send + Sync {
     /// Get the provider's name (e.g., "Solend", "Marginfi")
     fn name(&self) -> &'static str;
 
     /// Get a quote for a flash loan
-    async fn get_quote(
+    fn get_quote(
         &self,
         token_mint: Pubkey,
         amount: Decimal,
@@ -49,13 +47,12 @@ impl MockFlashLoanProvider {
     }
 }
 
-#[async_trait]
 impl FlashLoanProvider for MockFlashLoanProvider {
     fn name(&self) -> &'static str {
         "MockProvider"
     }
 
-    async fn get_quote(
+    fn get_quote(
         &self,
         token_mint: Pubkey,
         amount: Decimal,
@@ -89,8 +86,8 @@ mod tests {
     use super::*;
     use std::str::FromStr;
 
-    #[tokio::test]
-    async fn test_mock_flash_loan() {
+    #[test]
+    fn test_mock_flash_loan() {
         let provider = MockFlashLoanProvider::new("Solend-Mock");
         let amount = Decimal::from_str("100.0").unwrap();
         // Use a dummy pubkey
@@ -98,7 +95,6 @@ mod tests {
 
         let quote = provider
             .get_quote(token, amount)
-            .await
             .expect("Failed to get quote");
 
         assert_eq!(quote.provider_name, "Solend-Mock");
